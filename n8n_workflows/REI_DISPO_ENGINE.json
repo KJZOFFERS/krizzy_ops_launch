@@ -1,0 +1,9 @@
+{
+  "name": "REI_DISPO_ENGINE",
+  "active": false,
+  "nodes": [
+    { "parameters": {}, "id": "1", "name": "Start", "type": "n8n-nodes-base.start", "typeVersion": 1, "position": [200,200] },
+    { "parameters": { "requestMethod": "POST", "url": "={{$env.DISCORD_WEBHOOK_OPS}}", "jsonParameters": true, "bodyParametersJson": "{\"content\":\"REI_DISPO_ENGINE fired\"}" }, "id": "2", "name": "Discord OPS", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4, "position": [440,200] }
+  ],
+  "connections": { "Start": { "main": [[{ "node": "Discord OPS", "type": "main", "index": 0 }]] } }
+}

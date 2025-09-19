@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: krizzy-ops-web
+    env: node
+    plan: free
+    buildCommand: "cd web && npm ci"
+    startCommand: "cd web && node server.js"
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: DISCORD_WEBHOOK_OPS
+        fromSecret: DISCORD_WEBHOOK_OPS
+
+  - type: worker
+    name: krizzy-ops-n8n
+    plan: free
+    env: docker
+    dockerfilePath: worker/Dockerfile

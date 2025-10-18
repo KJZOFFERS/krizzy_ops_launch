@@ -1,14 +1,14 @@
-import os, requests, asyncio
-WEBHOOK_OPS = os.getenv("DISCORD_WEBHOOK_OPS")
-WEBHOOK_ERRORS = os.getenv("DISCORD_WEBHOOK_ERRORS")
+import os, requests, json
+from dotenv import load_dotenv
+load_dotenv()
 
-async def send_discord_message(channel_type, message):
-    url = WEBHOOK_ERRORS if channel_type == "errors" else WEBHOOK_OPS
-    if not url:
-        return
-    data = {"content": message[:1900]}
-    try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, requests.post, url, data)
-    except Exception:
-        pass
+OPS = os.getenv("DISCORD_WEBHOOK_OPS")
+ERR = os.getenv("DISCORD_WEBHOOK_ERRORS")
+
+def post_ops(msg):
+    if OPS:
+        requests.post(OPS, json={"content": f"✅ {msg}"})
+
+def post_error(msg):
+    if ERR:
+        requests.post(ERR, json={"content": f"❌ {msg}"})

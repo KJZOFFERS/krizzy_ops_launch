@@ -1,17 +1,12 @@
-import os, requests
-from dotenv import load_dotenv
-load_dotenv()
+import os
+from pyairtable import Table
 
-BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-KEY = os.getenv("AIRTABLE_API_KEY")
-HEADERS = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
+AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
+AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 
-def add_record(table, fields):
-    url = f"https://api.airtable.com/v0/{BASE_ID}/{table}"
-    r = requests.post(url, headers=HEADERS, json={"fields": fields})
-    return r.json()
+def push_record(table_name: str, data: dict):
+    table = Table(AIRTABLE_API_KEY, AIRTABLE_BASE_ID, table_name)
+    return table.create(data)
 
-def fetch_all(table):
-    url = f"https://api.airtable.com/v0/{BASE_ID}/{table}"
-    r = requests.get(url, headers=HEADERS)
-    return r.json().get("records", [])
+def log_kpi(event: str, data: dict):
+    push_record("KPI_Log", {"Event": event, "Data": str(data)})

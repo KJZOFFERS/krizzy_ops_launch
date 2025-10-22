@@ -1,4 +1,7 @@
 flask
-requests
-python-dotenv
 gunicorn
+aiohttp
+pyairtable
+schedule
+requests
+twilio

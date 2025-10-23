@@ -1,7 +1,4 @@
 flask
 gunicorn
-aiohttp
-pyairtable
-schedule
 requests
 twilio

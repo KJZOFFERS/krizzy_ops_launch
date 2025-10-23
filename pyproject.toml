@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "krizzy-ops"
+version = "3.0.0"
+description = "KRIZZY OPS - Real Estate Investment and Government Contracting Automation"
+authors = [
+    {name = "KRIZZY OPS Team", email = "ops@krizzy.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "flask==3.0.0",
+    "gunicorn==21.2.0",
+    "aiohttp==3.9.1",
+    "pyairtable==2.1.0",
+    "schedule==1.2.0",
+    "requests==2.31.0",
+    "twilio==8.10.0",
+    "python-dotenv==1.0.0",
+    "tenacity==8.2.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==7.4.3",
+    "pytest-asyncio==0.21.1",
+    "pytest-cov==4.1.0",
+    "black==23.11.0",
+    "ruff==0.1.6",
+    "mypy==1.7.1",
+    "bandit==1.7.5",
+    "safety==2.3.5",
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "pyairtable.*",
+    "twilio.*",
+    "tenacity.*",
+]
+ignore_missing_imports = true

@@ -8,7 +8,11 @@ from kpi import kpi_push
 
 app = Flask(__name__)
 
-@app.route("/health")
+@app.route("/", methods=["GET"])
+def root():
+    return jsonify({"status": "running", "ts": int(time.time())})
+
+@app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "ts": int(time.time())})
 

@@ -1,74 +1,70 @@
+"""Main Flask application for KRIZZY OPS."""
+
+import os
+import datetime
 from flask import Flask, jsonify
 from rei_dispo_engine import run_rei
 from govcon_subtrap_engine import run_govcon
 from watchdog import run_watchdog
-from airtable_utils import add_record
-import datetime
-import os
+from discord_utils import post_ops, post_err
+import kpi
+
 
 app = Flask(__name__)
-
-@app.route("/ops/rei", methods=["POST"])
-def rei():
-    """Run REI data pull and log results to Airtable."""
-    try:
-        count = run_rei()
-        add_record(
-            "KPI_Log",
-            {
-                "Cycle": "REI",
-                "Leads_Added": count,
-                "Timestamp": datetime.datetime.utcnow().isoformat(),
-            },
-        )
-        return jsonify({"REI_Leads": count})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/ops/govcon", methods=["POST"])
-def govcon():
-    """Run GovCon data pull and log results to Airtable."""
-    try:
-        count = run_govcon()
-        add_record(
-            "KPI_Log",
-            {
-                "Cycle": "GovCon",
-                "Bids_Added": count,
-                "Timestamp": datetime.datetime.utcnow().isoformat(),
-            },
-        )
-        return jsonify({"GovCon_Bids": count})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/ops/watchdog", methods=["POST"])
-def watch():
-    """Run daily data integrity scan."""
-    try:
-        count = run_watchdog()
-        add_record(
-            "KPI_Log",
-            {
-                "Cycle": "Watchdog",
-                "Leads_Added": count,
-                "Timestamp": datetime.datetime.utcnow().isoformat(),
-            },
-        )
-        return jsonify({"Cleaned": count})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Health endpoint for Railway uptime check."""
-    return jsonify({"status": "OK"})
+    """Health endpoint for uptime monitoring."""
+    return jsonify({
+        "status": "ok",
+        "ts": datetime.datetime.utcnow().isoformat(),
+    })
 
 
-# --- Main entry point for Railway ---
+@app.route("/ops/rei", methods=["POST"])
+def rei():
+    """Run REI disposition engine."""
+    try:
+        count = run_rei()
+        return jsonify({"REI_Leads": count})
+    except Exception as e:
+        post_err(f"REI endpoint error: {e}")
+        kpi.kpi_push("error", {"endpoint": "rei", "error": str(e)})
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route("/ops/govcon", methods=["POST"])
+def govcon():
+    """Run GovCon opportunity engine."""
+    try:
+        count = run_govcon()
+        return jsonify({"GovCon_Opportunities": count})
+    except Exception as e:
+        post_err(f"GovCon endpoint error: {e}")
+        kpi.kpi_push("error", {"endpoint": "govcon", "error": str(e)})
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route("/ops/watchdog", methods=["POST"])
+def watchdog_endpoint():
+    """Run watchdog validation cycle."""
+    try:
+        count = run_watchdog()
+        return jsonify({"Invalid_Records": count})
+    except Exception as e:
+        post_err(f"Watchdog endpoint error: {e}")
+        kpi.kpi_push("error", {"endpoint": "watchdog", "error": str(e)})
+        return jsonify({"error": "Internal server error"}), 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
+
+    kpi.kpi_push("boot", {
+        "port": port,
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+    })
+    post_ops(f"KRIZZY OPS started on port {port}")
+
     app.run(host="0.0.0.0", port=port)

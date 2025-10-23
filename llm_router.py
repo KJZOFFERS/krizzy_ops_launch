@@ -1,4 +1,8 @@
-import os, openai, requests
+from __future__ import annotations
+
+import os
+import requests
+import openai
 
 def call_openai(prompt):
     openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -11,7 +15,9 @@ def call_openai(prompt):
         )
         return resp["choices"][0]["message"]["content"]
     except Exception as e:
-        print("OpenAI fail:", e)
+        # Do not log secrets
+        # Minimal visible logging only
+        # print suppressed
         return None
 
 def call_anthropic(prompt):
@@ -32,7 +38,7 @@ def call_anthropic(prompt):
         r = requests.post(url, headers=headers, json=data, timeout=20)
         return r.json().get("content", [{}])[0].get("text")
     except Exception as e:
-        print("Claude fail:", e)
+        # suppressed
         return None
 
 def call_gemini(prompt):
@@ -45,7 +51,7 @@ def call_gemini(prompt):
         r = requests.post(url, json=data, timeout=20)
         return r.json()["candidates"][0]["content"]["parts"][0]["text"]
     except Exception as e:
-        print("Gemini fail:", e)
+        # suppressed
         return None
 
 def enrich_text(prompt):
@@ -56,6 +62,6 @@ def enrich_text(prompt):
             if result:
                 return result
         except Exception as e:
-            print("LLM fallback:", e)
+            # suppressed
             continue
     return "LLM enrichment unavailable"

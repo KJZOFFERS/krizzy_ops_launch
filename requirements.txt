@@ -5,3 +5,6 @@ pyairtable
 schedule
 requests
 twilio
+pytest
+ruff
+black

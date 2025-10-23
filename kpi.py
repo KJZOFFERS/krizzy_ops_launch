@@ -21,4 +21,4 @@ def kpi_push(event: str, data: Dict[str, Any]) -> None:
         # Dedupe fields
         "event_key": f"{event}:{ts[:10]}",
     }
-    safe_airtable_write("KPI_Log", record, key_fields=["event_key", "Event"]) 
+    safe_airtable_write("KPI_Log", record, key_fields=["event_key", "Event"])

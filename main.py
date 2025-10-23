@@ -8,6 +8,7 @@ import os
 
 app = Flask(__name__)
 
+
 @app.route("/ops/rei", methods=["POST"])
 def rei():
     """Run REI data pull and log results to Airtable."""

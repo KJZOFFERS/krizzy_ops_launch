@@ -4,7 +4,7 @@ import datetime
 import os
 import random
 import time
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
 import requests
 
@@ -12,11 +12,13 @@ from airtable_utils import fetch_all, safe_airtable_write
 from discord_utils import post_err, post_ops
 
 # Required env names
-NAICS_WHITELIST = {x.strip() for x in (os.getenv("NAICS_WHITELIST") or "").split(",") if x.strip()}
+NAICS_WHITELIST = {
+    x.strip() for x in (os.getenv("NAICS_WHITELIST") or "").split(",") if x.strip()
+}
 UEI = os.getenv("UEI")
 CAGE_CODE = os.getenv("CAGE_CODE")
 FPDS_ATOM_FEED = os.getenv("FPDS_ATOM_FEED")
-SAM_SEARCH_API = os.getenv("SAM_SEARCH_API") or os.getenv("SAM_SEARCH_API", os.getenv("SAM_API"))
+SAM_SEARCH_API = os.getenv("SAM_SEARCH_API") or os.getenv("SAM_API")
 
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 1.0
@@ -27,7 +29,11 @@ def _jitter_delay(attempt: int) -> float:
     return base + random.uniform(0, 0.5)
 
 
-def _http_get(url: str, params: Dict[str, Any] | None = None, headers: Dict[str, str] | None = None) -> requests.Response:
+def _http_get(
+    url: str,
+    params: Dict[str, Any] | None = None,
+    headers: Dict[str, str] | None = None,
+) -> requests.Response:
     attempt = 0
     while True:
         attempt += 1
@@ -70,7 +76,12 @@ def _filter_opps(opps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             continue
         t = (opp.get("type") or "").lower()
         title = (opp.get("title") or "").lower()
-        is_combined = "combined" in t or "synopsis" in t or "solicitation" in t or "combined synopsis" in title
+        is_combined = (
+            "combined" in t
+            or "synopsis" in t
+            or "solicitation" in t
+            or "combined synopsis" in title
+        )
         if not is_combined:
             continue
         filtered.append(opp)
@@ -82,7 +93,9 @@ def _build_bid_pack(opp: Dict[str, Any]) -> Dict[str, Any]:
         "title": opp.get("title"),
         "solicitationNumber": opp.get("solicitationNumber"),
         "naicsCode": opp.get("naicsCode"),
-        "dueDate": opp.get("responseDate") or opp.get("closeDate") or opp.get("dueDate"),
+        "dueDate": opp.get("responseDate")
+        or opp.get("closeDate")
+        or opp.get("dueDate"),
         "agency": opp.get("agency"),
         "contact": (opp.get("officers") or [{}])[0],
         "links": {
@@ -135,14 +148,16 @@ def pull_fpds() -> List[Dict[str, Any]]:
             link_el = entry.find("a:link", ns)
             link = link_el.get("href") if link_el is not None else ""
             updated = entry.findtext("a:updated", namespaces=ns) or ""
-            items.append({
-                "title": title,
-                "uiLink": link,
-                "responseDate": updated,
-                "type": "combined synopsis/solicitation",
-                "solicitationNumber": title.split()[0] if title else "",
-                "naicsCode": "",
-            })
+            items.append(
+                {
+                    "title": title,
+                    "uiLink": link,
+                    "responseDate": updated,
+                    "type": "combined synopsis/solicitation",
+                    "solicitationNumber": title.split()[0] if title else "",
+                    "naicsCode": "",
+                }
+            )
         return items
     except Exception:
         return []
@@ -181,8 +196,9 @@ def run_govcon() -> int:
             # Dedupe key
             "source_id": sid,
         }
-        safe_airtable_write("GovCon_Opportunities", record, key_fields=["source_id"])  # idempotent
+        safe_airtable_write(
+            "GovCon_Opportunities", record, key_fields=["source_id"]
+        )  # idempotent
         added += 1
     post_ops(f"GovCon loop added {added} opportunities")
     return added
-

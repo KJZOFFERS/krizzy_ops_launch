@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import random
 import time
@@ -9,7 +8,6 @@ from typing import Any, Dict, Iterable, List
 
 import requests
 from pyairtable import Table
-from pyairtable.api.types import Record
 
 # Required envs: AIRTABLE_API_KEY, AIRTABLE_BASE_ID
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
@@ -62,7 +60,7 @@ def _build_filter_formula(record: Dict[str, Any], key_fields: Iterable[str]) -> 
     return "AND(" + ",".join(clauses) + ")"
 
 
-def fetch_all(table_name: str) -> List[Record]:
+def fetch_all(table_name: str) -> List[Dict[str, Any]]:
     table = _get_table(table_name)
     attempt = 0
     while True:
@@ -70,13 +68,15 @@ def fetch_all(table_name: str) -> List[Record]:
         try:
             # pyairtable handles pagination internally with .all()
             return table.all(page_size=100)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             if attempt >= MAX_RETRIES:
                 raise
             time.sleep(_jitter_delay(attempt))
 
 
-def safe_airtable_write(table_name: str, record: Dict[str, Any], key_fields: Iterable[str]) -> Record:
+def safe_airtable_write(
+    table_name: str, record: Dict[str, Any], key_fields: Iterable[str]
+) -> Dict[str, Any]:
     """Idempotent upsert into Airtable.
 
     - key_fields: list of field names that uniquely identify a record
@@ -90,7 +90,7 @@ def safe_airtable_write(table_name: str, record: Dict[str, Any], key_fields: Ite
     while True:
         attempt += 1
         try:
-            existing: List[Record] = []
+            existing: List[Dict[str, Any]] = []
             if formula:
                 existing = table.all(filterByFormula=formula, page_size=1)
             if existing:

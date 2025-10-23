@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-
 from discord_utils import _jitter_delay as discord_delay
 from twilio_utils import _jitter_delay as twilio_delay
 from airtable_utils import _jitter_delay as airtable_delay

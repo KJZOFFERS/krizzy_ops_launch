@@ -8,3 +8,4 @@ twilio
 pytest
 ruff
 black
+openai

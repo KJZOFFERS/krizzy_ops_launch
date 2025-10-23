@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
-import time
-import json
 import requests
 
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
@@ -23,17 +20,23 @@ def main() -> int:
     # Airtable simple check: if keys present, attempt list bases via REST metadata (status 200/403 acceptable)
     if AIRTABLE_API_KEY and AIRTABLE_BASE_ID:
         url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/KPI_Log?maxRecords=1"
-        r = requests.get(url, headers={"Authorization": f"Bearer {AIRTABLE_API_KEY}"}, timeout=15)
+        r = requests.get(
+            url, headers={"Authorization": f"Bearer {AIRTABLE_API_KEY}"}, timeout=15
+        )
         print("Airtable status:", r.status_code)
         ok = ok and (r.status_code in (200, 401, 403))
 
     # Discord
     if DISCORD_WEBHOOK_OPS:
-        r = requests.post(DISCORD_WEBHOOK_OPS, json={"content": "smoke: ops ok"}, timeout=10)
+        r = requests.post(
+            DISCORD_WEBHOOK_OPS, json={"content": "smoke: ops ok"}, timeout=10
+        )
         print("Discord OPS:", r.status_code)
         ok = ok and (r.status_code in (200, 204))
     if DISCORD_WEBHOOK_ERRORS:
-        r = requests.post(DISCORD_WEBHOOK_ERRORS, json={"content": "smoke: errs ok"}, timeout=10)
+        r = requests.post(
+            DISCORD_WEBHOOK_ERRORS, json={"content": "smoke: errs ok"}, timeout=10
+        )
         print("Discord ERR:", r.status_code)
         ok = ok and (r.status_code in (200, 204))
 

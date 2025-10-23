@@ -9,7 +9,9 @@ class DummyTable:
         self.updated = []
         self.records = []
 
-    def all(self, filterByFormula: str | None = None, page_size: int = 100):  # noqa: N803 - external API
+    def all(
+        self, filterByFormula: str | None = None, page_size: int = 100
+    ):  # noqa: N803 - external API
         if not filterByFormula:
             return list(self.records)
         key = filterByFormula.split("'")[-2]

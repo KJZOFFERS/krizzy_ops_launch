@@ -1,32 +1,36 @@
-import os, time, threading
-from flask import Flask, jsonify
+import asyncio, time
+from fastapi import FastAPI
 from validate_env import validate_env
-from watchdog import start_watchdog
-from rei_dispo_engine import start_rei_dispo
-from govcon_subtrap_engine import start_govcon
-from kpi import kpi_push
+from utils.watchdog import start_watchdog, uptime, lag
+from utils.kpi import push
+from engines.rei_dispo_engine import run_rei_cycle
+from engines.govcon_subtrap_engine import run_govcon_cycle
+from utils.data_extraction import run_data_cycle
 
-app = Flask(__name__)
+app = FastAPI()
 
-@app.route("/", methods=["GET"])
-def root():
-    return jsonify({"status": "running", "ts": int(time.time())})
+@app.get("/")
+async def root():
+    return {"status": "ok", "ts": int(time.time())}
 
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok", "ts": int(time.time())})
+@app.get("/metrics")
+async def metrics():
+    return {"uptime": uptime(), "lag": lag()}
 
-def on_startup():
-    validate_env([
-        "AIRTABLE_API_KEY","AIRTABLE_BASE_ID",
-        "DISCORD_WEBHOOK_OPS","DISCORD_WEBHOOK_ERRORS",
-        "TWILIO_ACCOUNT_SID","TWILIO_AUTH_TOKEN","TWILIO_MESSAGING_SERVICE_SID"
-    ])
-    kpi_push(event="boot", data={"service": "krizzy_ops"})
-    threading.Thread(target=start_watchdog, daemon=True).start()
-    threading.Thread(target=start_rei_dispo, daemon=True).start()
-    threading.Thread(target=start_govcon, daemon=True).start()
+@app.on_event("startup")
+async def startup():
+    validate_env()
+    asyncio.create_task(start_watchdog())
+    asyncio.create_task(orchestrator())
+
+async def orchestrator():
+    while True:
+        await run_data_cycle()
+        await run_rei_cycle()
+        await run_govcon_cycle()
+        push("cycle_complete", {"status": "ok"})
+        await asyncio.sleep(900)  # 15 min cycle
 
 if __name__ == "__main__":
-    on_startup()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)

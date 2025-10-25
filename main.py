@@ -1,8 +1,8 @@
 from fastapi import FastAPI
+import threading, time, os
 from utils.watchdog import start_watchdog
 from utils.kpi import kpi_push
 from utils.validate_env import validate_env
-import threading, time, os
 
 app = FastAPI()
 
@@ -12,10 +12,17 @@ async def health():
 
 @app.on_event("startup")
 async def startup_event():
-    validate_env(["AIRTABLE_API_KEY","AIRTABLE_BASE_ID",
-                  "DISCORD_WEBHOOK_OPS","DISCORD_WEBHOOK_ERRORS"])
+    validate_env([
+        "AIRTABLE_API_KEY",
+        "AIRTABLE_BASE_ID",
+        "DISCORD_WEBHOOK_OPS",
+        "DISCORD_WEBHOOK_ERRORS",
+        "TWILIO_ACCOUNT_SID",
+        "TWILIO_AUTH_TOKEN",
+        "TWILIO_MESSAGING_SERVICE_SID"
+    ])
     threading.Thread(target=start_watchdog, daemon=True).start()
-    kpi_push(event="boot", data={"service":"krizzy_ops"})
+    kpi_push(event="boot", data={"service": "krizzy_ops"})
 
 if __name__ == "__main__":
     import uvicorn

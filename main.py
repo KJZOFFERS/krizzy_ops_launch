@@ -1,36 +1,28 @@
-import asyncio, time
 from fastapi import FastAPI
-from validate_env import validate_env
-from utils.watchdog import start_watchdog, uptime, lag
-from utils.kpi import push
-from engines.rei_dispo_engine import run_rei_cycle
-from engines.govcon_subtrap_engine import run_govcon_cycle
-from utils.data_extraction import run_data_cycle
+import asyncio, threading
+from utils.watchdog import start_watchdog
+from utils.kpi import log_kpi
+from engines.rei_dispo_engine import run_rei_dispo
+from engines.govcon_subtrap_engine import run_govcon
 
 app = FastAPI()
 
-@app.get("/")
-async def root():
-    return {"status": "ok", "ts": int(time.time())}
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
-@app.get("/metrics")
-async def metrics():
-    return {"uptime": uptime(), "lag": lag()}
-
-@app.on_event("startup")
-async def startup():
-    validate_env()
-    asyncio.create_task(start_watchdog())
-    asyncio.create_task(orchestrator())
-
-async def orchestrator():
+async def main_loop():
     while True:
-        await run_data_cycle()
-        await run_rei_cycle()
-        await run_govcon_cycle()
-        push("cycle_complete", {"status": "ok"})
-        await asyncio.sleep(900)  # 15 min cycle
+        await asyncio.gather(
+            run_rei_dispo(),
+            run_govcon(),
+        )
+        await asyncio.sleep(300)
+
+def on_startup():
+    threading.Thread(target=start_watchdog, daemon=True).start()
+    log_kpi("system_boot", {"status": "live"})
+    asyncio.run(main_loop())
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    on_startup()

@@ -1,19 +1,15 @@
-import asyncio, time, os, requests
+import time, threading, requests, os
+from utils.discord_utils import send_discord_message
 
-START = time.time()
-LAST = START
-
-async def start_watchdog():
-    global LAST
+def health_ping():
     while True:
-        await asyncio.sleep(int(os.getenv("HEARTBEAT_INTERVAL_SECONDS", "60")))
-        lag_val = round(time.time() - LAST, 2)
         try:
-            requests.post(os.getenv("DISCORD_WEBHOOK_OPS"),
-                          json={"content": f"Heartbeat ok | lag={lag_val}s"})
-        except Exception:
-            pass
-        LAST = time.time()
+            r = requests.get(f"{os.getenv('RAILWAY_URL')}/health", timeout=10)
+            if r.status_code != 200:
+                send_discord_message("⚠️ Healthcheck failed", "errors")
+        except Exception as e:
+            send_discord_message(f"Watchdog error: {e}", "errors")
+        time.sleep(300)
 
-def uptime(): return round(time.time() - START, 1)
-def lag(): return round(time.time() - LAST, 2)
+def start_watchdog():
+    threading.Thread(target=health_ping, daemon=True).start()

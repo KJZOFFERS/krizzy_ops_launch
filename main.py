@@ -1,28 +1,22 @@
 from fastapi import FastAPI
-import asyncio, threading
 from utils.watchdog import start_watchdog
-from utils.kpi import log_kpi
-from engines.rei_dispo_engine import run_rei_dispo
-from engines.govcon_subtrap_engine import run_govcon
+from utils.kpi import kpi_push
+from utils.validate_env import validate_env
+import threading, time, os
 
 app = FastAPI()
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "running", "ts": int(time.time())}
 
-async def main_loop():
-    while True:
-        await asyncio.gather(
-            run_rei_dispo(),
-            run_govcon(),
-        )
-        await asyncio.sleep(300)
-
-def on_startup():
+@app.on_event("startup")
+async def startup_event():
+    validate_env(["AIRTABLE_API_KEY","AIRTABLE_BASE_ID",
+                  "DISCORD_WEBHOOK_OPS","DISCORD_WEBHOOK_ERRORS"])
     threading.Thread(target=start_watchdog, daemon=True).start()
-    log_kpi("system_boot", {"status": "live"})
-    asyncio.run(main_loop())
+    kpi_push(event="boot", data={"service":"krizzy_ops"})
 
 if __name__ == "__main__":
-    on_startup()
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8080)))

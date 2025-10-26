@@ -1,14 +1,14 @@
-import asyncio, requests
-from utils.airtable_utils import write_record
-from utils.discord_utils import send_discord_message
+import time
+from utils.airtable_utils import push_record
+from utils.discord_utils import post_to_discord
 
-async def run_govcon():
-    try:
-        resp = requests.get("https://api.sam.gov/opportunities/v1/search?limit=5")
-        data = resp.json().get("opportunities", [])
-        for opp in data:
-            write_record("GovCon_Opportunities", opp)
-        send_discord_message(f"GOVCON_SUBTRAP logged {len(data)} opportunities")
-    except Exception as e:
-        send_discord_message(f"GOVCON_SUBTRAP error: {e}", "errors")
-        await asyncio.sleep(60)
+def run_govcon_subtrap():
+    while True:
+        try:
+            opp = {"Solicitation": "SAM Test", "NAICS": "541611"}
+            push_record("GovCon_Opportunities", opp)
+            post_to_discord("ops", f"GOVCON_SUBTRAP cycle executed: {opp}")
+            time.sleep(120)
+        except Exception as e:
+            post_to_discord("errors", f"GOVCON_SUBTRAP error: {e}")
+            time.sleep(60)

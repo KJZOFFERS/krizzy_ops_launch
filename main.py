@@ -12,6 +12,7 @@ async def health():
 
 @app.on_event("startup")
 async def startup_event():
+    # Check environment keys before running anything
     validate_env([
         "AIRTABLE_API_KEY",
         "AIRTABLE_BASE_ID",
@@ -21,7 +22,9 @@ async def startup_event():
         "TWILIO_AUTH_TOKEN",
         "TWILIO_MESSAGING_SERVICE_SID"
     ])
+    # Start watchdog in background
     threading.Thread(target=start_watchdog, daemon=True).start()
+    # Log boot KPI
     kpi_push(event="boot", data={"service": "krizzy_ops"})
 
 if __name__ == "__main__":

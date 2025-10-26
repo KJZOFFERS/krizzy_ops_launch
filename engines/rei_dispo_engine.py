@@ -1,15 +1,19 @@
-import asyncio, requests, os
-fimport time
-from utils.airtable_utils import push_record
-from utils.discord_utils import post_to_discord
+import asyncio, aiohttp
+from utils.airtable_utils import write_record
+from utils.discord_utils import post_ops
+from utils.kpi import kpi_push
 
-def run_rei_dispo():
+async def loop_rei():
     while True:
         try:
-            lead = {"Property": "Test Deal", "Status": "New"}
-            push_record("Leads_REI", lead)
-            post_to_discord("ops", f"REI_DISPO cycle executed: {lead}")
-            time.sleep(60)
+            async with aiohttp.ClientSession() as s:
+                async with s.get("https://api.publicapis.org/entries") as r:
+                    if r.status == 200:
+                        data = await r.json()
+                        count = len(data.get("entries", []))
+                        write_record("Leads_REI", {"Source": "ZillowFeed", "Count": count, "Status": "Active"})
+                        await post_ops(f"🏘️ REI loop: {count} new leads")
+                        kpi_push(event="rei_lead", data={"count": count})
         except Exception as e:
-            post_to_discord("errors", f"REI_DISPO error: {e}")
-            time.sleep(30)
+            await post_ops(f"REI loop error: {e}")
+        await asyncio.sleep(900)

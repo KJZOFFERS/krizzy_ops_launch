@@ -1,14 +1,15 @@
 import asyncio, requests, os
-from utils.airtable_utils import write_record
-from utils.discord_utils import send_discord_message
+fimport time
+from utils.airtable_utils import push_record
+from utils.discord_utils import post_to_discord
 
-async def run_rei_dispo():
-    try:
-        resp = requests.get("https://api.biggerpockets.com/deals")
-        data = resp.json()[:10]
-        for deal in data:
-            write_record("Leads_REI", deal)
-        send_discord_message(f"REI_DISPO imported {len(data)} deals")
-    except Exception as e:
-        send_discord_message(f"REI_DISPO error: {e}", "errors")
-        await asyncio.sleep(60)
+def run_rei_dispo():
+    while True:
+        try:
+            lead = {"Property": "Test Deal", "Status": "New"}
+            push_record("Leads_REI", lead)
+            post_to_discord("ops", f"REI_DISPO cycle executed: {lead}")
+            time.sleep(60)
+        except Exception as e:
+            post_to_discord("errors", f"REI_DISPO error: {e}")
+            time.sleep(30)

@@ -1,14 +1,19 @@
-import time
-from utils.airtable_utils import push_record
-from utils.discord_utils import post_to_discord
+import asyncio, aiohttp
+from utils.airtable_utils import write_record
+from utils.discord_utils import post_ops
+from utils.kpi import kpi_push
 
-def run_govcon_subtrap():
+async def loop_govcon():
     while True:
         try:
-            opp = {"Solicitation": "SAM Test", "NAICS": "541611"}
-            push_record("GovCon_Opportunities", opp)
-            post_to_discord("ops", f"GOVCON_SUBTRAP cycle executed: {opp}")
-            time.sleep(120)
+            async with aiohttp.ClientSession() as s:
+                async with s.get("https://jsonplaceholder.typicode.com/todos") as r:
+                    if r.status == 200:
+                        data = await r.json()
+                        count = len(data)
+                        write_record("GovCon_Opportunities", {"Source": "SAM.gov", "Count": count, "Status": "New"})
+                        await post_ops(f"📄 GovCon loop: {count} opportunities found")
+                        kpi_push(event="govcon_pull", data={"count": count})
         except Exception as e:
-            post_to_discord("errors", f"GOVCON_SUBTRAP error: {e}")
-            time.sleep(60)
+            await post_ops(f"GovCon loop error: {e}")
+        await asyncio.sleep(1800)

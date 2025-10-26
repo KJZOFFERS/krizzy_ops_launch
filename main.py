@@ -1,25 +1,31 @@
+import asyncio
 from fastapi import FastAPI
-import asyncio, time
-from engines.rei_dispo_engine import loop_rei
-from engines.govcon_subtrap_engine import loop_govcon
+from engines.rei_dispo_engine import run_rei_dispo
+from engines.govcon_subtrap_engine import run_govcon_subtrap
 from utils.watchdog import start_watchdog
-from utils.kpi import kpi_push
-from utils.validate_env import validate_env
+from utils.discord_utils import send_discord
+import time
 
 app = FastAPI()
 
 @app.get("/health")
-def health():
+async def health():
     return {"status": "running", "ts": int(time.time())}
+
+async def start_loops():
+    """Run all loops continuously with async recovery."""
+    while True:
+        try:
+            await asyncio.gather(
+                run_rei_dispo(),
+                run_govcon_subtrap(),
+                start_watchdog()
+            )
+        except Exception as e:
+            await send_discord("errors", f"⚠️ Engine crash: {e}")
+        await asyncio.sleep(900)  # restart all engines every 15 min
 
 @app.on_event("startup")
 async def startup_event():
-    validate_env([
-        "AIRTABLE_API_KEY","AIRTABLE_BASE_ID",
-        "DISCORD_WEBHOOK_OPS","DISCORD_WEBHOOK_ERRORS",
-        "TWILIO_ACCOUNT_SID","TWILIO_AUTH_TOKEN","TWILIO_MESSAGING_SERVICE_SID"
-    ])
-    kpi_push(event="boot", data={"service":"krizzy_ops"})
-    asyncio.create_task(loop_rei())
-    asyncio.create_task(loop_govcon())
-    start_watchdog()
+    await send_discord("ops", "🚀 KRIZZY OPS engines online.")
+    asyncio.create_task(start_loops())

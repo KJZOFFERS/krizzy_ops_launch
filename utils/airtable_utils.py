@@ -1,9 +1,12 @@
-from pyairtable import Table
-import os
+import requests, os
 
-def write_record(table_name, data):
-    base_id = os.getenv("AIRTABLE_BASE_ID")
-    api_key = os.getenv("AIRTABLE_API_KEY")
-    table = Table(api_key, base_id, table_name)
-    table.create(data)
-    return True
+AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
+BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+
+def push_record(table_name, data):
+    url = f"https://api.airtable.com/v0/{BASE_ID}/{table_name}"
+    headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}", "Content-Type": "application/json"}
+    payload = {"records": [{"fields": data}]}
+    r = requests.post(url, headers=headers, json=payload, timeout=20)
+    r.raise_for_status()
+    return r.json()

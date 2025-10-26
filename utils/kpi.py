@@ -1,6 +1,6 @@
-from utils.airtable_utils import push_record
-import time
+from utils.airtable_utils import write_record
 
 def kpi_push(event, data):
-    payload = {"Event": event, "Timestamp": int(time.time()), **data}
-    push_record("KPI_Log", payload)
+    fields = {"Event": event}
+    fields.update(data)
+    write_record("KPI_Log", fields)

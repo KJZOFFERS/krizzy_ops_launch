@@ -1,31 +1,24 @@
-import asyncio
 from fastapi import FastAPI
-from engines.rei_dispo_engine import run_rei_dispo
-from engines.govcon_subtrap_engine import run_govcon_subtrap
-from utils.watchdog import start_watchdog
-from utils.discord_utils import send_discord
-import time
+import asyncio, os, time
 
 app = FastAPI()
 
 @app.get("/health")
 async def health():
-    return {"status": "running", "ts": int(time.time())}
+    """Simple check so Railway can confirm the container is alive."""
+    return {"status": "running", "timestamp": int(time.time())}
 
-async def start_loops():
-    """Run all loops continuously with async recovery."""
+async def background_tasks():
+    """Simulates the main operational loop."""
     while True:
-        try:
-            await asyncio.gather(
-                run_rei_dispo(),
-                run_govcon_subtrap(),
-                start_watchdog()
-            )
-        except Exception as e:
-            await send_discord("errors", f"⚠️ Engine crash: {e}")
-        await asyncio.sleep(900)  # restart all engines every 15 min
+        # Add your real engines here later
+        await asyncio.sleep(60)
 
 @app.on_event("startup")
 async def startup_event():
-    await send_discord("ops", "🚀 KRIZZY OPS engines online.")
-    asyncio.create_task(start_loops())
+    asyncio.create_task(background_tasks())
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)

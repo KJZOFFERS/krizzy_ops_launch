@@ -1,10 +1,12 @@
-import requests, os
+import os, requests
 
-def post_to_discord(channel, message):
-    webhook = os.getenv(f"DISCORD_WEBHOOK_{channel.upper()}")
-    if not webhook:
-        return
-    try:
-        requests.post(webhook, json={"content": message}, timeout=10)
-    except Exception:
-        pass
+OPS = os.getenv("DISCORD_WEBHOOK_OPS")
+ERR = os.getenv("DISCORD_WEBHOOK_ERRORS")
+
+async def post_ops(msg):
+    if OPS:
+        requests.post(OPS, json={"content": msg})
+
+def post_errors(msg):
+    if ERR:
+        requests.post(ERR, json={"content": msg})

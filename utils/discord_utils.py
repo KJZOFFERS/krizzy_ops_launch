@@ -1,21 +1,17 @@
-import os, aiohttp, asyncio
+import os
+import requests
 
-_WEBHOOKS = {
-    "ops": os.getenv("DISCORD_WEBHOOK_OPS", ""),
-    "errors": os.getenv("DISCORD_WEBHOOK_ERRORS", ""),
-    "trades": os.getenv("DISCORD_WEBHOOK_TRADES", "")
-}
+WEBHOOK_OPS = os.getenv("DISCORD_WEBHOOK_OPS")
+WEBHOOK_ERRORS = os.getenv("DISCORD_WEBHOOK_ERRORS")
 
-async def send_discord(channel: str, text: str):
-    url = _WEBHOOKS.get(channel, "")
-    if not url:
-        return
-    payload = {"content": text[:1900]}
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.post(url, json=payload, timeout=10) as r:
-                if r.status >= 400:
-                    await asyncio.sleep(2)
-                    await s.post(url, json=payload)
-    except Exception:
-        pass
+def post_ops(msg: str):
+    if WEBHOOK_OPS:
+        requests.post(WEBHOOK_OPS, json={"content": msg})
+
+def post_error(msg: str):
+    if WEBHOOK_ERRORS:
+        requests.post(WEBHOOK_ERRORS, json={"content": msg})
+
+# Compatibility with older calls
+def send_discord(msg: str):
+    post_ops(msg)

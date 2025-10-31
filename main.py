@@ -24,20 +24,26 @@ async def diagnostics():
 
 def start_rei_loop():
     while True:
-        try: loop_rei()
-        except Exception as e: print(f"[REI_LOOP_ERROR] {e}")
+        try:
+            loop_rei()
+        except Exception as e:
+            print(f"[REI_LOOP_ERROR] {e}")
         time.sleep(60)
 
 def start_govcon_loop():
     while True:
-        try: loop_govcon()
-        except Exception as e: print(f"[GOVCON_LOOP_ERROR] {e}")
+        try:
+            loop_govcon()
+        except Exception as e:
+            print(f"[GOVCON_LOOP_ERROR] {e}")
         time.sleep(300)
 
 def start_watchdog_loop():
     while True:
-        try: loop_watchdog()
-        except Exception as e: print(f"[WATCHDOG_LOOP_ERROR] {e}")
+        try:
+            loop_watchdog()
+        except Exception as e:
+            print(f"[WATCHDOG_LOOP_ERROR] {e}")
         time.sleep(30)
 
 @app.on_event("startup")

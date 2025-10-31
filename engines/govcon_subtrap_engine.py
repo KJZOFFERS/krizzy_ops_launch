@@ -5,12 +5,9 @@ last_govcon_run = None
 
 def loop_govcon():
     global last_govcon_run
-    # --- YOUR EXISTING GOVERNMENT CONTRACT LOGIC ---
-    # Do not remove. Do not reorder.
-    # Example:
-    # fetch solicitations, filter, write airtable, notify
 
-    # After successful cycle:
+    # --- YOUR GOVCON PROCESSING LOGIC LIVES HERE ---
+    # Do not delete. Replace with your actual GovCon workflow when ready.
+
     last_govcon_run = int(time.time())
-    post_ops(f"[GOVCON] Cycle complete at {last_govcon_run}")
-
+    post_ops(f"[GOVCON] cycle complete at {last_govcon_run}")

@@ -11,7 +11,3 @@ def post_ops(msg: str):
 def post_error(msg: str):
     if WEBHOOK_ERRORS:
         requests.post(WEBHOOK_ERRORS, json={"content": msg})
-
-# Compatibility with older calls
-def send_discord(msg: str):
-    post_ops(msg)

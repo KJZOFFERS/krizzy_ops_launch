@@ -1,49 +1,48 @@
 import os
 import json
-from typing import Dict, Any, Optional
-from datetime import datetime, timezone
-
-from pyairtable import Table
-from pyairtable.api import Api
-
+import logging
+import requests
 
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-KPI_TABLE_NAME = "KPI_Log"
-SERVICE_NAME = os.getenv("SERVICE_NAME", "krizzy_ops_web")
 
-
-def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _table_or_none() -> Optional[Table]:
-    if not (AIRTABLE_API_KEY and AIRTABLE_BASE_ID):
-        return None
-    api = Api(AIRTABLE_API_KEY)
-    return api.table(AIRTABLE_BASE_ID, KPI_TABLE_NAME)
-
-
-async def kpi_log_safe(event: str, meta: Optional[Dict[str, Any]] = None) -> bool:
-    """
-    Safe, idempotent-ish KPI log write.
-    - No-ops if Airtable envs are missing.
-    - Stores meta as JSON string to avoid schema issues.
-    """
-    tbl = _table_or_none()
-    if not tbl:
-        return False
-
-    fields = {
-        "Event": event,
-        "Service": SERVICE_NAME,
-        "Timestamp": _now_iso(),
-        "Meta": json.dumps(meta or {}, ensure_ascii=False),
+def _headers():
+    if not AIRTABLE_API_KEY or not AIRTABLE_BASE_ID:
+        raise RuntimeError("Missing AIRTABLE_API_KEY or AIRTABLE_BASE_ID")
+    return {
+        "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+        "Content-Type": "application/json",
     }
 
+def airtable_write(table: str, record: dict):
+    """
+    Create one record via Airtable REST.
+    """
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{table}"
+    payload = {"records": [{"fields": record}], "typecast": True}
+    resp = requests.post(url, json=payload, headers=_headers(), timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["records"][0] if "records" in data and data["records"] else data
+
+# Back-compat alias if other modules import write_record
+write_record = airtable_write
+
+def safe_airtable_note(table: str, note: str, extra: dict | None = None):
+    """
+    Best-effort write. Never raises — logs errors only.
+    Expects the table to have a 'Note' (or similar) text field; if your schema differs,
+    adjust the field key below to match your base.
+    """
+    if not (AIRTABLE_API_KEY and AIRTABLE_BASE_ID):
+        return False
     try:
-        tbl.create(fields)
+        fields = {"Note": note}
+        if extra:
+            # Store extra as JSON text to avoid schema mismatch
+            fields["Meta"] = json.dumps(extra, ensure_ascii=False)
+        airtable_write(table, fields)
         return True
-    except Exception:
-        # swallow errors to avoid bringing the service down
+    except Exception as e:
+        logging.warning(f"Airtable note failed: {e}")
         return False

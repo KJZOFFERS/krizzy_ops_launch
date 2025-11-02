@@ -1,5 +1,3 @@
-aiohttp
 fastapi
-uvicorn
-requests
-twilio
+uvicorn[standard]
+httpx

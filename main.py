@@ -1,163 +1,105 @@
-import os, asyncio, time
+import json
+import os
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Optional, Dict, Any
 
-import httpx
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
+from pydantic import BaseModel
 
-APP_NAME = "krizzy_ops_web"
+from utils.discord_utils import post_ops, post_error
+from utils.airtable_utils import kpi_log_safe
 
-# ---- Env helpers ----
-def env(name: str, default: str = "") -> str:
-    v = os.getenv(name, default)
-    return v.strip() if v else ""
+SERVICE_NAME = os.getenv("SERVICE_NAME", "krizzy_ops_web")
+ENV = os.getenv("ENV", "production")
 
-AIRTABLE_API_KEY   = env("AIRTABLE_API_KEY")
-AIRTABLE_BASE_ID   = env("AIRTABLE_BASE_ID")
-KPI_TABLE          = env("KPI_TABLE", "KPI_Log")
+app = FastAPI(title="KRIZZY OPS Web", version="1.0.0")
 
-DISCORD_OPS        = env("DISCORD_WEBHOOK_OPS")
-DISCORD_ERRORS     = env("DISCORD_WEBHOOK_ERRORS")
 
-RUN_REI            = env("RUN_REI", "1") == "1"
-RUN_GOVCON         = env("RUN_GOVCON", "1") == "1"
-
-REI_INTERVAL_SEC   = int(env("REI_INTERVAL_MINUTES", "15")) * 60
-GOV_INTERVAL_SEC   = int(env("GOVCON_INTERVAL_MINUTES", "20")) * 60
-WATCHDOG_INTERVAL  = int(env("WATCHDOG_INTERVAL_SECONDS", "60"))
-
-# ---- App + in-memory state ----
-app = FastAPI()
-state: Dict[str, Any] = {
-    "boot_ts": time.time(),
-    "rei_last_run": None,
-    "govcon_last_run": None,
-    "watchdog_last_ping": None,
-    "loops": {"rei": RUN_REI, "govcon": RUN_GOVCON}
-}
-
-def utcnow_iso() -> str:
+def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-# ---- IO helpers ----
-async def post_discord(webhook: str, content: str) -> None:
-    if not webhook:
-        return
-    async with httpx.AsyncClient(timeout=10) as client:
-        try:
-            await client.post(webhook, json={"content": content})
-        except Exception:
-            # Best-effort; don't crash loops on Discord hiccups
-            pass
-
-async def airtable_insert(table: str, fields: Dict[str, Any]) -> None:
-    if not (AIRTABLE_API_KEY and AIRTABLE_BASE_ID and table):
-        return
-    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{table}"
-    headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
-    payload = {"records": [{"fields": fields}]}
-    async with httpx.AsyncClient(timeout=15) as client:
-        try:
-            await client.post(url, headers=headers, json=payload)
-        except Exception:
-            # Quiet fail; keep loops resilient
-            pass
-
-# ---- Business loop stubs (hook in your engines here) ----
-async def run_rei_dispo_once() -> Dict[str, Any]:
-    """
-    Hook point: call your REI dispo engine here (scrape/enrich/match).
-    This baseline logs a heartbeat to Airtable + Discord.
-    """
-    ts = utcnow_iso()
-    fields = {"Engine": "REI_DISPO", "Status": "ran", "Timestamp": ts}
-    await airtable_insert(KPI_TABLE, fields)
-    await post_discord(DISCORD_OPS, f"✅ REI_DISPO ran @ {ts}")
-    return {"ok": True, "ts": ts}
-
-async def run_govcon_once() -> Dict[str, Any]:
-    """
-    Hook point: call your GovCon Sub-Trap here (SAM/FPDS ingest, filter, push).
-    Baseline logs a heartbeat to Airtable + Discord.
-    """
-    ts = utcnow_iso()
-    fields = {"Engine": "GOVCON_SUBTRAP", "Status": "ran", "Timestamp": ts}
-    await airtable_insert(KPI_TABLE, fields)
-    await post_discord(DISCORD_OPS, f"✅ GOVCON_SUBTRAP ran @ {ts}")
-    return {"ok": True, "ts": ts}
-
-# ---- Background loops ----
-async def watchdog_loop():
-    while True:
-        ts = utcnow_iso()
-        state["watchdog_last_ping"] = ts
-        await airtable_insert(KPI_TABLE, {"Engine": "WATCHDOG", "Status": "ping", "Timestamp": ts})
-        await asyncio.sleep(WATCHDOG_INTERVAL)
-
-async def rei_loop():
-    while True:
-        try:
-            result = await run_rei_dispo_once()
-            state["rei_last_run"] = result.get("ts")
-        except Exception as e:
-            await post_discord(DISCORD_ERRORS, f"❌ REI_DISPO error: {e}")
-        await asyncio.sleep(REI_INTERVAL_SEC)
-
-async def govcon_loop():
-    while True:
-        try:
-            result = await run_govcon_once()
-            state["govcon_last_run"] = result.get("ts")
-        except Exception as e:
-            await post_discord(DISCORD_ERRORS, f"❌ GOVCON_SUBTRAP error: {e}")
-        await asyncio.sleep(GOV_INTERVAL_SEC)
 
 @app.on_event("startup")
-async def startup_tasks():
-    # Kick off background tasks
-    asyncio.create_task(watchdog_loop())
-    if RUN_REI:
-        asyncio.create_task(rei_loop())
-    if RUN_GOVCON:
-        asyncio.create_task(govcon_loop())
-    await post_discord(DISCORD_OPS, f"🚀 {APP_NAME} started @ {utcnow_iso()} (loops: {state['loops']})")
+async def on_startup():
+    # Non-blocking notifications/metrics (safe no-op if envs not present)
+    await post_ops(f"✅ {SERVICE_NAME} online | env={ENV} | ts={now_iso()}")
+    await kpi_log_safe(
+        event="web_online",
+        meta={"env": ENV, "service": SERVICE_NAME, "ts": now_iso()},
+    )
 
-# ---- Routes ----
+
 @app.get("/")
-def root():
+async def root():
     return {
         "status": "ok",
-        "service": APP_NAME,
-        "uptime_sec": round(time.time() - state["boot_ts"], 1),
-        "loops": state["loops"],
-        "rei_last_run": state["rei_last_run"],
-        "govcon_last_run": state["govcon_last_run"],
-        "watchdog_last_ping": state["watchdog_last_ping"],
+        "service": SERVICE_NAME,
+        "env": ENV,
+        "timestamp": now_iso(),
     }
+
 
 @app.get("/health")
-def health():
-    env_ok = bool(AIRTABLE_API_KEY and AIRTABLE_BASE_ID)
-    return {
-        "status": "healthy",
-        "service": APP_NAME,
-        "env": {
-            "airtable": env_ok,
-            "discord_ops": bool(DISCORD_OPS),
-            "discord_errors": bool(DISCORD_ERRORS),
-        }
-    }
+async def health():
+    return {"status": "healthy", "service": SERVICE_NAME}
+
 
 @app.get("/healthz")
-def healthz():
-    return {"status": "healthy", "service": APP_NAME}
+async def healthz():
+    # Legacy path retained
+    return {"status": "healthy", "service": SERVICE_NAME}
 
-@app.post("/run/rei")
-async def run_rei(background: BackgroundTasks):
-    background.add_task(run_rei_dispo_once)
-    return {"queued": True, "engine": "REI_DISPO"}
 
-@app.post("/run/govcon")
-async def run_govcon(background: BackgroundTasks):
-    background.add_task(run_govcon_once)
-    return {"queued": True, "engine": "GOVCON_SUBTRAP"}
+class HeartbeatIn(BaseModel):
+    note: Optional[str] = None
+    kpi_tag: Optional[str] = "manual"
+
+
+@app.post("/kpi/heartbeat")
+async def heartbeat(payload: HeartbeatIn):
+    # Writes to Airtable KPI_Log if configured (safe no-op otherwise)
+    meta = {"note": payload.note, "kpi_tag": payload.kpi_tag, "env": ENV}
+    ok = await kpi_log_safe(event="heartbeat", meta=meta)
+    return {"logged": ok, "service": SERVICE_NAME, "timestamp": now_iso()}
+
+
+@app.post("/twilio/inbound")
+async def twilio_inbound(request: Request, bg: BackgroundTasks):
+    # Twilio posts application/x-www-form-urlencoded
+    form = await request.form()
+    from_num = form.get("From")
+    body = form.get("Body")
+    sid = form.get("MessageSid")
+
+    if not body:
+        raise HTTPException(status_code=400, detail="Missing Body")
+
+    msg = f"📩 Twilio inbound | from={from_num} | sid={sid}\n```\n{body}\n```"
+    bg.add_task(post_ops, msg)
+
+    await kpi_log_safe(
+        event="twilio_inbound",
+        meta={"from": from_num, "sid": sid, "len": len(body or "")},
+    )
+
+    # Return empty TwiML to acknowledge
+    return {
+        "received": True,
+        "service": SERVICE_NAME,
+        "sid": sid,
+        "timestamp": now_iso(),
+    }
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    # Never crash silently; report to Discord + KPI
+    detail = {
+        "path": str(request.url),
+        "method": request.method,
+        "error": repr(exc),
+        "ts": now_iso(),
+    }
+    await post_error(f"🔥 Exception\n```json\n{json.dumps(detail, indent=2)}\n```")
+    await kpi_log_safe(event="exception", meta=detail)
+    return {"error": "internal_error", "detail": detail}

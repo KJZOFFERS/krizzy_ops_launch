@@ -40,3 +40,7 @@ async def run_data_cycle():
     for bid in govcon: write_record("GovCon_Opportunities", bid)
     send_message("DISCORD_WEBHOOK_OPS",
                  f"Data updated: {len(rei)} REI, {len(govcon)} GovCon")
+    write_record("GovCon_Opportunities", {"items": items})
+    write_record("Leads_REI", {"deals": deals})
+    send_message("Data cycle complete")
+

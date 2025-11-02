@@ -1,14 +1,8 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
-  "build": {
-    "builder": "RAILPACK"
-  },
   "deploy": {
-    "runtime": "V2",
-    "numReplicas": 1,
-    "healthcheckPath": "/healthz",
-    "sleepApplication": false,
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
+    "startCommand": "python worker.py",
+    "healthcheckPath": null,
+    "restartPolicyType": "ALWAYS"
   }
 }

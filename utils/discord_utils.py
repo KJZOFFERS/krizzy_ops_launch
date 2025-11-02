@@ -1,34 +1,56 @@
-import os
-import json
-import logging
-import requests
+from typing import List, Optional, Union
+from utils.safe import make_client, request_with_retries
+from config import CFG
 
-OPS_HOOK = os.getenv("DISCORD_WEBHOOK_OPS")
-ERR_HOOK = os.getenv("DISCORD_WEBHOOK_ERRORS")
+def _webhooks(raw: Optional[Union[str, List[str]]]) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        raw = [raw]
+    return [w for w in (raw or []) if isinstance(w, str) and w.startswith("http")]
 
-TIMEOUT = 10
+def _post(content: str, targets: List[str]) -> None:
+    if not targets:
+        return
+    client = make_client()
+    payload = {"content": str(content)[:1900]}
+    headers = {"Content-Type": "application/json"}
+    for url in targets:
+        def _do():
+            return client.post(url, json=payload, headers=headers)
+        request_with_retries(_do, service="discord")
 
-def _post(webhook: str | None, content: str, embeds=None):
-    if not webhook:
-        logging.info(f"[DISCORD SKIP] {content}")
-        return False
-    payload = {"content": content}
-    if embeds:
-        payload["embeds"] = embeds
-    resp = requests.post(webhook, json=payload, timeout=TIMEOUT)
-    if resp.status_code >= 400:
-        logging.error(f"Discord post failed {resp.status_code}: {resp.text}")
-        return False
-    return True
+def post_ops(msg: str) -> None:
+    # Prefer OPS; if unset, try ERRORS
+    targets = CFG.DISCORD_WEBHOOK_OPS or CFG.DISCORD_WEBHOOK_ERRORS
+    _post(msg, _webhooks(targets))
 
-def post_ops(msg: str, extra: dict | None = None):
-    embeds = None
-    if extra:
-        embeds = [{"description": "```json\n" + json.dumps(extra, indent=2) + "\n```"}]
-    return _post(OPS_HOOK, msg, embeds)
+def post_error(msg: str) -> None:
+    # Prefer ERRORS; fallback to OPS
+    targets = CFG.DISCORD_WEBHOOK_ERRORS or CFG.DISCORD_WEBHOOK_OPS
+    _post("❌ " + str(msg), _webhooks(targets))
 
-def post_error(msg: str, extra: dict | None = None):
-    embeds = None
-    if extra:
-        embeds = [{"description": "```json\n" + json.dumps(extra, indent=2) + "\n```"}]
-    return _post(ERR_HOOK, f"**ERROR:** {msg}", embeds)
+# Backward-compatible shim for old call sites.
+# Accepted forms:
+#   send_message("text")
+#   send_message("text", webhooks="https://discord.com/api/webhooks/...")
+#   send_message("text", webhooks=["...","..."])
+#   send_message("text", channel="ops"|"errors")
+def send_message(
+    content: Union[str, int, float],
+    webhooks: Optional[Union[str, List[str]]] = None,
+    *,
+    channel: str = "ops"
+) -> None:
+    content = str(content)
+    targets: List[str] = []
+    if webhooks:
+        targets = _webhooks(webhooks)
+    else:
+        if channel.lower() in ("error", "errors"):
+            targets = _webhooks(CFG.DISCORD_WEBHOOK_ERRORS or CFG.DISCORD_WEBHOOK_OPS)
+        else:
+            targets = _webhooks(CFG.DISCORD_WEBHOOK_OPS or CFG.DISCORD_WEBHOOK_ERRORS)
+    _post(content, targets)
+
+__all__ = ["post_ops", "post_error", "send_message"]

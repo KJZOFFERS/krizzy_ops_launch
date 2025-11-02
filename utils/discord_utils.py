@@ -1,25 +1,34 @@
 import os
-from typing import Optional
-import httpx
+import json
+import logging
+import requests
 
-OPS = os.getenv("DISCORD_WEBHOOK_OPS")
-ERR = os.getenv("DISCORD_WEBHOOK_ERRORS")
+OPS_HOOK = os.getenv("DISCORD_WEBHOOK_OPS")
+ERR_HOOK = os.getenv("DISCORD_WEBHOOK_ERRORS")
 
+TIMEOUT = 10
 
-async def _send(webhook: Optional[str], content: str) -> bool:
+def _post(webhook: str | None, content: str, embeds=None):
     if not webhook:
+        logging.info(f"[DISCORD SKIP] {content}")
         return False
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(webhook, json={"content": content})
-            return resp.status_code < 300
-    except Exception:
+    payload = {"content": content}
+    if embeds:
+        payload["embeds"] = embeds
+    resp = requests.post(webhook, json=payload, timeout=TIMEOUT)
+    if resp.status_code >= 400:
+        logging.error(f"Discord post failed {resp.status_code}: {resp.text}")
         return False
+    return True
 
+def post_ops(msg: str, extra: dict | None = None):
+    embeds = None
+    if extra:
+        embeds = [{"description": "```json\n" + json.dumps(extra, indent=2) + "\n```"}]
+    return _post(OPS_HOOK, msg, embeds)
 
-async def post_ops(content: str) -> bool:
-    return await _send(OPS, content)
-
-
-async def post_error(content: str) -> bool:
-    return await _send(ERR, content)
+def post_error(msg: str, extra: dict | None = None):
+    embeds = None
+    if extra:
+        embeds = [{"description": "```json\n" + json.dumps(extra, indent=2) + "\n```"}]
+    return _post(ERR_HOOK, f"**ERROR:** {msg}", embeds)

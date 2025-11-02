@@ -1,5 +1,7 @@
+2from engines import rei_dispo_engine, govcon_subtrap_engine
+from utils.validate_env import validate_or_die
 from fastapi import FastAPI
-import threading
+import threading, time
 import time
 import uvicorn
 
@@ -8,6 +10,7 @@ from engines.govcon_subtrap_engine import loop_govcon, last_govcon_run
 from utils.watchdog import loop_watchdog, last_watchdog_ping
 
 app = FastAPI()
+validate_or_die()
 service_start_time = int(time.time())
 
 @app.get("/health")
@@ -15,7 +18,14 @@ async def health():
     return {"status": "running", "service_start_time": service_start_time}
 
 @app.get("/diagnostics")
-async def diagnostics():
+def diagnostics():
+    wd = __import__("utils.watchdog", fromlist=["*"])
+    return {
+        "rei_last_run": getattr(rei_dispo_engine, "last_rei_run", None),
+        "govcon_last_run": getattr(govcon_subtrap_engine, "last_govcon_run", None),
+        "watchdog_last_ping": getattr(wd, "last_heartbeat", None),
+    }
+
     return {
         "rei_last_run": last_rei_run,
         "govcon_last_run": last_govcon_run,

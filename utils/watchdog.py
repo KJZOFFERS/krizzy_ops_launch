@@ -1,10 +1,19 @@
-import time
-from utils.discord_utils import post_error
+# utils/watchdog.py
+import asyncio
+import logging
+from typing import Callable
 
-last_watchdog_ping = None
+logger = logging.getLogger(__name__)
 
-def loop_watchdog():
-    global last_watchdog_ping
-    last_watchdog_ping = int(time.time())
-    # If something is wrong, raise alert:
-    # post_error("[WATCHDOG] anomaly detected")
+async def watchdog_loop(interval: int, on_ping: Callable):
+    """
+    Background watchdog that calls on_ping() every interval seconds
+    """
+    logger.info(f"Watchdog started with {interval}s interval")
+    
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            on_ping()
+        except Exception as e:
+            logger.error(f"Watchdog error: {e}")

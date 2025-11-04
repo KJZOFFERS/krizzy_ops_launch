@@ -1,67 +1,35 @@
-# utils/__init__.py
-# Compatibility layer so existing imports work.
-import os
-import json
-import time
-from typing import Dict, Any, List, Optional
-from urllib.parse import quote_plus
-import requests
+import math
 
-AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
-AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-AT_TABLE_KPI = os.getenv("AIRTABLE_KPI_TABLE", os.getenv("AT_TABLE_KPI", "KPI_Log"))
-
-def _api_base() -> str:
-    if not AIRTABLE_API_KEY or not AIRTABLE_BASE_ID:
-        raise RuntimeError("Missing AIRTABLE_API_KEY or AIRTABLE_BASE_ID")
-    return f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}"
-
-def _headers() -> Dict[str, str]:
-    return {"Authorization": f"Bearer {AIRTABLE_API_KEY}", "Content-Type": "application/json"}
-
-def now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-def create_record(table: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-    url = f"{_api_base()}/{quote_plus(table)}"
-    payload = {"records": [{"fields": fields}]}
-    r = requests.post(url, headers=_headers(), data=json.dumps(payload), timeout=15)
-    r.raise_for_status()
-    data = r.json()
-    return data["records"][0]
-
-def update_record(table: str, record_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-    url = f"{_api_base()}/{quote_plus(table)}/{record_id}"
-    payload = {"fields": fields}
-    r = requests.patch(url, headers=_headers(), data=json.dumps(payload), timeout=15)
-    r.raise_for_status()
-    return r.json()
-
-def list_records(table: str, max_records: int = 1000) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    url = f"{_api_base()}/{quote_plus(table)}"
-    params: Dict[str, Any] = {"pageSize": 100}
-    while True:
-        r = requests.get(url, headers=_headers(), params=params, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-        out.extend(data.get("records", []))
-        if "offset" not in data or len(out) >= max_records:
-            break
-        params["offset"] = data["offset"]
-    return out
-
-def kpi_log(engine: str, action: str, details: str = "", ref: Optional[str] = None) -> None:
-    fields = {
-        "Timestamp": now_iso(),
-        "Engine": engine,
-        "Action": action,
-        "Details": details,
-    }
-    if ref:
-        fields["LeadID or OpportunityID"] = ref
+def zip_distance(zip1: str, zip2: str) -> int:
+    """Simple numeric zip distance. Lower = closer."""
     try:
-        create_record(AT_TABLE_KPI, fields)
-    except Exception:
-        # Never crash on KPI write
-        pass
+        return abs(int(zip1) - int(zip2))
+    except:
+        return 99999
+
+def match_buyers_to_lead(lead_zip: str, lead_price: float, buyers: list):
+    """
+    Returns list of buyers who match:
+    - Similar zip proximity
+    - budget_max >= ask price
+    - opted_out != True
+    """
+    matches = []
+    for b in buyers:
+        f = b.get("fields", {})
+        if f.get("opted_out"):
+            continue
+
+        buyer_zip = f.get("zip")
+        budget = f.get("budget_max")
+
+        if not buyer_zip or not budget:
+            continue
+        if float(budget) < float(lead_price):
+            continue
+
+        dist = zip_distance(str(lead_zip), str(buyer_zip))
+        matches.append((dist, b))
+
+    matches.sort(key=lambda x: x[0])
+    return [m[1] for m in matches]

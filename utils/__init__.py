@@ -1,9 +1,21 @@
-fastapi>=0.115
-uvicorn[standard]>=0.30
-httpx>=0.27,<0.28
-aiohttp>=3.9
-twilio>=8.10
-python-dotenv>=1.0
-pydantic>=2.7
+# Utils package re-exports. Keep this file code-only.
+from .airtable_utils import (
+    list_records,
+    create_record,
+    update_record,
+    upsert_record,
+)
+from .discord_utils import post_ops, post_error
+from .kpi import log_kpi
+from .watchdog import heartbeat
 
-
+__all__ = [
+    "list_records",
+    "create_record",
+    "update_record",
+    "upsert_record",
+    "post_ops",
+    "post_error",
+    "log_kpi",
+    "heartbeat",
+]

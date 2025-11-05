@@ -1,11 +1,8 @@
 # utils/__init__.py
-# Avoid boot-time import failures by not importing heavy submodules eagerly.
-
-__all__ = ["list_records"]
+__all__ = ["list_records", "create_record"]
 
 def __getattr__(name: str):
-    if name == "list_records":
-        from .airtable_utils import list_records
-        return list_records
+    if name in ("list_records", "create_record"):
+        from .airtable_utils import list_records, create_record
+        return {"list_records": list_records, "create_record": create_record}[name]
     raise AttributeError(name)
-

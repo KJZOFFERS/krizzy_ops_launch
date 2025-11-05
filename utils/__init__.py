@@ -1,8 +1,12 @@
-# utils/__init__.py
-__all__ = ["list_records", "create_record"]
+__all__ = ["list_records", "create_record", "update_record", "upsert_record"]
 
 def __getattr__(name: str):
-    if name in ("list_records", "create_record"):
-        from .airtable_utils import list_records, create_record
-        return {"list_records": list_records, "create_record": create_record}[name]
+    if name in __all__:
+        from .airtable_utils import list_records, create_record, update_record, upsert_record
+        return {
+            "list_records": list_records,
+            "create_record": create_record,
+            "update_record": update_record,
+            "upsert_record": upsert_record,
+        }[name]
     raise AttributeError(name)

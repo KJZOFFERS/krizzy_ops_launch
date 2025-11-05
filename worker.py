@@ -1,17 +1,14 @@
-import asyncio, logging
-from utils.discord_utils import post_error
+# FILE: worker.py
+import asyncio
+from utils.discord_utils import post_ops
 
-def notify(message):
+def notify(msg: str):
     try:
-        logging.info(f"Worker notify: {message}")
-    except Exception as e:
-        logging.error(f"Notification failed: {e}")
+        post_ops(msg)
+    except Exception:
+        pass
 
 async def worker_loop():
     while True:
-        try:
-            logging.info("KRIZZY OPS worker running...")
-            await asyncio.sleep(60)
-        except Exception as e:
-            post_error(f"Worker loop error: {e}")
-
+        notify("KRIZZY OPS worker running...")
+        await asyncio.sleep(60)

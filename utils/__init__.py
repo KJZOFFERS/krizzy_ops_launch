@@ -1,16 +1,26 @@
-# Code-only re-exports for the utils package.
-from .airtable_utils import list_records, create_record, update_record, upsert_record
-from .discord_utils import post_ops, post_error
-from .kpi import log_kpi
-from .watchdog import heartbeat
+from __future__ import annotations
 
 __all__ = [
     "list_records",
     "create_record",
     "update_record",
     "upsert_record",
-    "post_ops",
-    "post_error",
+    "fetch_table",
+    "safe_airtable_write",
     "log_kpi",
-    "heartbeat",
 ]
+
+from .airtable_utils import (
+    list_records,
+    create_record,
+    update_record,
+    upsert_record,
+    fetch_table,
+    safe_airtable_write,
+)
+
+try:
+    from .kpi import log_kpi  # exported for callers that used utils.log_kpi
+except Exception:  # safe fallback if KPI not configured
+    def log_kpi(*_args, **_kwargs):
+        return None

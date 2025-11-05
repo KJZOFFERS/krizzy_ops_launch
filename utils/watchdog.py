@@ -1,11 +1,11 @@
-# FILE: watchdog.py
-import asyncio
-from utils.discord_utils import post_ops
+import os
+from .discord_utils import post_ops
 
-async def heartbeat():
-    while True:
-        try:
-            post_ops("KRIZZY OPS heartbeat active")
-        except Exception:
-            pass
-        await asyncio.sleep(60)
+SERVICE_NAME = os.getenv("SERVICE_NAME", "krizzy_ops_web")
+
+def heartbeat() -> None:
+    try:
+        post_ops(f"{SERVICE_NAME} heartbeat")
+    except Exception:
+        # Avoid crashing app on ops failures.
+        pass

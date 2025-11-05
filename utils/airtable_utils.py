@@ -1,8 +1,7 @@
 # FILE: utils/airtable_utils.py
-from __future__ import annotations
-import os
 from typing import Iterable, Optional, Dict, Any, List
 from urllib.parse import quote
+import os
 import httpx
 
 try:
@@ -76,8 +75,14 @@ def update_record(table: str, record_id: str, fields: Dict[str, Any]) -> Dict[st
         r.raise_for_status()
         return r.json()
 
+def _escape_formula_value(val: Any) -> str:
+    # Airtable formulas accept double-quoted strings; escape embedded double quotes.
+    return str(val).replace('"', '\\"')
+
 def upsert_record(table: str, key_field: str, key_value: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-    formula = f"{{{key_field}}} = '{key_value.replace(\"'\",\"\\'\")}'"
+    # Use double quotes in formula to avoid single-quote escaping issues.
+    # Example: {key} = "abc\"def"
+    formula = f'{{{key_field}}} = "{_escape_formula_value(key_value)}"'
     existing = list_records(table, formula=formula, max_records=1)
     if existing:
         rid = existing[0]["id"]
@@ -93,7 +98,7 @@ def safe_airtable_write(table: str, fields: Dict[str, Any], retries: int = 3) ->
             return create_record(table, fields)
         except Exception as e:
             last_exc = e
-    raise last_exc
+    raise last_exc  # type: ignore[misc]
 
 def safe_upsert(table: str, key_field: str, key_value: str, fields: Dict[str, Any], retries: int = 3) -> Dict[str, Any]:
     last_exc = None
@@ -102,7 +107,7 @@ def safe_upsert(table: str, key_field: str, key_value: str, fields: Dict[str, An
             return upsert_record(table, key_field, key_value, fields)
         except Exception as e:
             last_exc = e
-    raise last_exc
+    raise last_exc  # type: ignore[misc]
 
 # --- table alias + fetch helpers ---
 
@@ -133,3 +138,4 @@ def fetch_table(
         page_size=page_size,
         max_records=max_records,
     )
+

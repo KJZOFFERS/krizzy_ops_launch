@@ -1,10 +1,5 @@
-# Utils package re-exports. Keep this file code-only.
-from .airtable_utils import (
-    list_records,
-    create_record,
-    update_record,
-    upsert_record,
-)
+# Code-only re-exports for the utils package.
+from .airtable_utils import list_records, create_record, update_record, upsert_record
 from .discord_utils import post_ops, post_error
 from .kpi import log_kpi
 from .watchdog import heartbeat

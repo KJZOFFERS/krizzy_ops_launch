@@ -1,16 +1,28 @@
-# FILE: kpi.py
 from __future__ import annotations
-import time, os
-from utils import upsert_record, create_record
+import os
+from datetime import datetime, timezone
+from typing import Dict, Any
+from .airtable_utils import create_record
 
-KPI_TABLE = os.getenv("AIRTABLE_TABLE_KPI_LOG", "KPI_Log")
+def _kpi_table() -> str:
+    return os.getenv("AT_TABLE_KPI") or os.getenv("AIRTABLE_TABLE_KPI") or "KPI_Log"
 
-def kpi_log(service: str, status: str, **metrics):
-    ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    fields = {"timestamp": ts, "service": service, "status": status, **metrics}
-    # create simple append record; if you want dedupe, use upsert on a composite key
-    try:
-        return create_record(KPI_TABLE, fields)
-    except Exception:
-        # last resort: ignore KPI failure
-        return {}
+def log_kpi(event: str, fields: Dict[str, Any] | None = None) -> Dict[str, Any] | None:
+    """
+    Write a KPI record to Airtable if envs exist. No-op if not configured.
+    Returns Airtable response dict, or None if skipped.
+    """
+    base = os.getenv("AIRTABLE_BASE_ID")
+    key  = os.getenv("AIRTABLE_API_KEY")
+    if not base or not key:
+        return None
+
+    data = {
+        "Event": event,
+        "Service": os.getenv("SERVICE_NAME", "krizzy_ops_web"),
+        "Env": os.getenv("ENV", "production"),
+        "TS": datetime.now(timezone.utc).isoformat(),
+    }
+    if fields:
+        data.update(fields)
+    return create_record(_kpi_table(), data)

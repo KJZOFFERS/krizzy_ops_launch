@@ -4,17 +4,19 @@ import os, httpx
 from typing import Iterable, Optional, Dict, Any
 from urllib.parse import quote
 
+_API = "https://api.airtable.com/v0"
+
 def _headers() -> Dict[str, str]:
-    api_key = os.getenv("AIRTABLE_API_KEY")
-    if not api_key:
+    key = os.getenv("AIRTABLE_API_KEY")
+    if not key:
         raise RuntimeError("AIRTABLE_API_KEY is not set")
-    return {"Authorization": f"Bearer {api_key}"}
+    return {"Authorization": f"Bearer {key}"}
 
 def _base_id() -> str:
-    base_id = os.getenv("AIRTABLE_BASE_ID")
-    if not base_id:
+    bid = os.getenv("AIRTABLE_BASE_ID")
+    if not bid:
         raise RuntimeError("AIRTABLE_BASE_ID is not set")
-    return base_id
+    return bid
 
 def list_records(
     table: str,
@@ -24,35 +26,40 @@ def list_records(
     page_size: int = 100,
     max_records: Optional[int] = None,
 ) -> list[Dict[str, Any]]:
-    """
-    Returns a list of Airtable record dicts: [{"id": "...","fields": {...}}, ...]
-    """
-    base_id = _base_id()
-    url = f"https://api.airtable.com/v0/{base_id}/{quote(table)}"
-
+    base = _base_id()
+    url = f"{_API}/{base}/{quote(table)}"
     params: Dict[str, Any] = {"pageSize": page_size}
-    if view:
-        params["view"] = view
-    if formula:
-        params["filterByFormula"] = formula
+    if view: params["view"] = view
+    if formula: params["filterByFormula"] = formula
     if fields:
         for f in fields:
             params.setdefault("fields[]", []).append(f)
 
     out: list[Dict[str, Any]] = []
     offset = None
-    with httpx.Client(timeout=15) as client:
+    with httpx.Client(timeout=15) as c:
         while True:
             q = dict(params)
-            if offset:
-                q["offset"] = offset
-            r = client.get(url, headers=_headers(), params=q)
+            if offset: q["offset"] = offset
+            r = c.get(url, headers=_headers(), params=q)
             r.raise_for_status()
             data = r.json()
-            recs = data.get("records", [])
-            out.extend(recs)
+            out.extend(data.get("records", []))
             if max_records and len(out) >= max_records:
                 return out[:max_records]
             offset = data.get("offset")
             if not offset:
                 return out
+
+def create_record(table: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Create a single record. Returns {'id': 'rec...', 'fields': {...}, 'createdTime': '...'}
+    """
+    base = _base_id()
+    url = f"{_API}/{base}/{quote(table)}"
+    payload = {"fields": fields}
+    with httpx.Client(timeout=15) as c:
+        r = c.post(url, headers={**_headers(), "Content-Type": "application/json"}, json=payload)
+        r.raise_for_status()
+        return r.json()
+

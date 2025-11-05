@@ -1,8 +1,7 @@
 import os
 from fastapi import FastAPI, HTTPException
 from utils.discord_utils import post_ops, post_error
-from utils import list_records, create_record, upsert_record
-from utils.watchdog import heartbeat  # NOTE: package path fixed
+from utils import list_records, upsert_record, heartbeat
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "krizzy_ops_web")
 AT_TABLE_LEADS = os.getenv("AT_TABLE_LEADS_REI", "Leads_REI")
@@ -18,7 +17,7 @@ def health():
 def on_startup():
     try:
         post_ops(f"{SERVICE_NAME} boot OK")
-        heartbeat()  # sends a small ops ping if implemented
+        heartbeat()
     except Exception as e:
         post_error(f"startup error: {e}")
 
@@ -37,11 +36,19 @@ def ingest_lead(payload: dict):
 
 @app.get("/match/buyers/{zip_code}")
 def match_buyers(zip_code: str, ask: float = 0):
-    # Opt-out filter + budget and zip targeting
-    formula = f"AND({{opted_out}} != 1, {{zip}} = '{zip_code}', OR(NOT({{budget_max}} = ''), {{budget_max}} >= {ask}))"
+    # opted_out != 1 AND zip match AND budget gate
+    formula = (
+        f"AND({{opted_out}} != 1, "
+        f"{{zip}} = '{zip_code}', "
+        f"OR(NOT({{budget_max}} = ''), {{budget_max}} >= {ask}))"
+    )
     try:
         recs = list_records(AT_TABLE_BUYERS, formula=formula, max_records=10)
-        phones = [r.get("fields", {}).get("phone") for r in recs if r.get("fields", {}).get("phone")]
+        phones = [
+            r.get("fields", {}).get("phone")
+            for r in recs
+            if r.get("fields", {}).get("phone")
+        ]
         return {"buyers": phones[:10]}
     except Exception as e:
         post_error(f"/match/buyers failed: {e}")

@@ -1,28 +1,30 @@
 from __future__ import annotations
 import os
-from datetime import datetime, timezone
-from typing import Dict, Any
-from .airtable_utils import create_record
+import time
+from typing import Any, Dict
 
-def _kpi_table() -> str:
-    return os.getenv("AT_TABLE_KPI") or os.getenv("AIRTABLE_TABLE_KPI") or "KPI_Log"
+# Lazy import inside function to avoid import-time failures if envs are missing
+def _table_name() -> str:
+    return (
+        os.getenv("AIRTABLE_TABLE_KPI_LOG")
+        or os.getenv("AT_TABLE_KPI")
+        or "KPI_Log"
+    )
 
-def log_kpi(event: str, fields: Dict[str, Any] | None = None) -> Dict[str, Any] | None:
-    """
-    Write a KPI record to Airtable if envs exist. No-op if not configured.
-    Returns Airtable response dict, or None if skipped.
-    """
-    base = os.getenv("AIRTABLE_BASE_ID")
-    key  = os.getenv("AIRTABLE_API_KEY")
-    if not base or not key:
-        return None
+def log_kpi(event: str, payload: Dict[str, Any] | None = None) -> None:
+    fields: Dict[str, Any] = {"event": event, "ts": int(time.time())}
+    if payload:
+        for k, v in payload.items():
+            if isinstance(v, (str, int, float, bool)) or v is None:
+                fields[k] = v
+            else:
+                fields[k] = str(v)
+    try:
+        from .airtable_utils import create_record
+        create_record(_table_name(), fields)
+    except Exception:
+        # Never block app on KPI logging
+        pass
 
-    data = {
-        "Event": event,
-        "Service": os.getenv("SERVICE_NAME", "krizzy_ops_web"),
-        "Env": os.getenv("ENV", "production"),
-        "TS": datetime.now(timezone.utc).isoformat(),
-    }
-    if fields:
-        data.update(fields)
-    return create_record(_kpi_table(), data)
+def compute_kpi(data):
+    return sum(data) / len(data) if data else 0

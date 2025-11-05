@@ -49,3 +49,6 @@ def _load() -> _CFG:
     )
 
 CFG = _load()
+
+
+CFG = _load()

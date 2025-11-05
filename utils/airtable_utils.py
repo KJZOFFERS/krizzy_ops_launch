@@ -1,22 +1,28 @@
-# utils/airtable_utils.py
 from __future__ import annotations
-import os, httpx
-from typing import Iterable, Optional, Dict, Any
+import os
+from typing import Iterable, Optional, Dict, Any, List
 from urllib.parse import quote
+import httpx
 
 _API = "https://api.airtable.com/v0"
 
+def _env(name: str) -> str:
+    v = os.getenv(name)
+    if not v:
+        raise RuntimeError(f"{name} is not set")
+    return v
+
 def _headers() -> Dict[str, str]:
-    key = os.getenv("AIRTABLE_API_KEY")
-    if not key:
-        raise RuntimeError("AIRTABLE_API_KEY is not set")
-    return {"Authorization": f"Bearer {key}"}
+    return {
+        "Authorization": f"Bearer {_env('AIRTABLE_API_KEY')}",
+        "Content-Type": "application/json",
+    }
 
 def _base_id() -> str:
-    bid = os.getenv("AIRTABLE_BASE_ID")
-    if not bid:
-        raise RuntimeError("AIRTABLE_BASE_ID is not set")
-    return bid
+    return _env("AIRTABLE_BASE_ID")
+
+def _table_url(table: str) -> str:
+    return f"{_API}/{_base_id()}/{quote(table)}"
 
 def list_records(
     table: str,
@@ -25,22 +31,24 @@ def list_records(
     fields: Optional[Iterable[str]] = None,
     page_size: int = 100,
     max_records: Optional[int] = None,
-) -> list[Dict[str, Any]]:
-    base = _base_id()
-    url = f"{_API}/{base}/{quote(table)}"
+) -> List[Dict[str, Any]]:
+    url = _table_url(table)
     params: Dict[str, Any] = {"pageSize": page_size}
-    if view: params["view"] = view
-    if formula: params["filterByFormula"] = formula
+    if view:
+        params["view"] = view
+    if formula:
+        params["filterByFormula"] = formula
     if fields:
         for f in fields:
             params.setdefault("fields[]", []).append(f)
 
-    out: list[Dict[str, Any]] = []
+    out: List[Dict[str, Any]] = []
     offset = None
     with httpx.Client(timeout=15) as c:
         while True:
             q = dict(params)
-            if offset: q["offset"] = offset
+            if offset:
+                q["offset"] = offset
             r = c.get(url, headers=_headers(), params=q)
             r.raise_for_status()
             data = r.json()
@@ -52,14 +60,24 @@ def list_records(
                 return out
 
 def create_record(table: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Create a single record. Returns {'id': 'rec...', 'fields': {...}, 'createdTime': '...'}
-    """
-    base = _base_id()
-    url = f"{_API}/{base}/{quote(table)}"
-    payload = {"fields": fields}
+    url = _table_url(table)
     with httpx.Client(timeout=15) as c:
-        r = c.post(url, headers={**_headers(), "Content-Type": "application/json"}, json=payload)
+        r = c.post(url, headers=_headers(), json={"fields": fields})
         r.raise_for_status()
         return r.json()
 
+def update_record(table: str, record_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+    url = f"{_table_url(table)}/{record_id}"
+    with httpx.Client(timeout=15) as c:
+        r = c.patch(url, headers=_headers(), json={"fields": fields})
+        r.raise_for_status()
+        return r.json()
+
+def upsert_record(table: str, key_field: str, key_value: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+    # Find by {key_field} = key_value; create if absent, else update
+    formula = f"{{{key_field}}} = '{key_value.replace(\"'\",\"\\'\")}'"
+    existing = list_records(table, formula=formula, max_records=1)
+    if existing:
+        rid = existing[0]["id"]
+        return update_record(table, rid, fields)
+    return create_record(table, {**fields, key_field: key_value})

@@ -1,5 +1,4 @@
-
-import os, time, requests, aiohttp, asyncio, logging
+import asyncio, logging
 from utils.discord_utils import post_error
 
 def notify(message):
@@ -15,3 +14,4 @@ async def worker_loop():
             await asyncio.sleep(60)
         except Exception as e:
             post_error(f"Worker loop error: {e}")
+

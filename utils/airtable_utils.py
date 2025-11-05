@@ -1,25 +1,28 @@
+# FILE: utils/airtable_utils.py
 from __future__ import annotations
 import os
 from typing import Iterable, Optional, Dict, Any, List
 from urllib.parse import quote
 import httpx
 
+try:
+    from config import CFG
+except Exception:
+    CFG = None  # fallback to raw env
+
 _API = "https://api.airtable.com/v0"
 
-def _env(name: str) -> str:
-    v = os.getenv(name)
-    if not v:
-        raise RuntimeError(f"{name} is not set")
-    return v
-
 def _headers() -> Dict[str, str]:
-    return {
-        "Authorization": f"Bearer {_env('AIRTABLE_API_KEY')}",
-        "Content-Type": "application/json",
-    }
+    key = (CFG.AIRTABLE_API_KEY if CFG else None) or os.getenv("AIRTABLE_API_KEY")
+    if not key:
+        raise RuntimeError("AIRTABLE_API_KEY is not set")
+    return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
 def _base_id() -> str:
-    return _env("AIRTABLE_BASE_ID")
+    bid = (CFG.AIRTABLE_BASE_ID if CFG else None) or os.getenv("AIRTABLE_BASE_ID")
+    if not bid:
+        raise RuntimeError("AIRTABLE_BASE_ID is not set")
+    return bid
 
 def _table_url(table: str) -> str:
     return f"{_API}/{_base_id()}/{quote(table)}"
@@ -74,10 +77,59 @@ def update_record(table: str, record_id: str, fields: Dict[str, Any]) -> Dict[st
         return r.json()
 
 def upsert_record(table: str, key_field: str, key_value: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-    # Find by {key_field} = key_value; create if absent, else update
     formula = f"{{{key_field}}} = '{key_value.replace(\"'\",\"\\'\")}'"
     existing = list_records(table, formula=formula, max_records=1)
     if existing:
         rid = existing[0]["id"]
         return update_record(table, rid, fields)
     return create_record(table, {**fields, key_field: key_value})
+
+# --- safe write helpers ---
+
+def safe_airtable_write(table: str, fields: Dict[str, Any], retries: int = 3) -> Dict[str, Any]:
+    last_exc = None
+    for _ in range(retries):
+        try:
+            return create_record(table, fields)
+        except Exception as e:
+            last_exc = e
+    raise last_exc
+
+def safe_upsert(table: str, key_field: str, key_value: str, fields: Dict[str, Any], retries: int = 3) -> Dict[str, Any]:
+    last_exc = None
+    for _ in range(retries):
+        try:
+            return upsert_record(table, key_field, key_value, fields)
+        except Exception as e:
+            last_exc = e
+    raise last_exc
+
+# --- table alias + fetch helpers ---
+
+_TABLE_MAP: Dict[str, str] = {
+    "Leads_REI": (CFG.AIRTABLE_TABLE_LEADS if CFG else None) or os.getenv("AIRTABLE_TABLE_LEADS", "Leads_REI"),
+    "Buyers": (CFG.AIRTABLE_TABLE_BUYERS if CFG else None) or os.getenv("AIRTABLE_TABLE_BUYERS", "Buyers"),
+    "GovCon_Opportunities": (CFG.AIRTABLE_TABLE_GOVCON if CFG else None) or os.getenv("AIRTABLE_TABLE_GOVCON", "GovCon_Opportunities"),
+    "KPI_Log": (CFG.AIRTABLE_TABLE_KPI_LOG if CFG else None) or os.getenv("AIRTABLE_TABLE_KPI_LOG", "KPI_Log"),
+}
+
+def resolve_table(name: str) -> str:
+    return _TABLE_MAP.get(name, name)
+
+def fetch_table(
+    table: str,
+    *,
+    view: Optional[str] = None,
+    formula: Optional[str] = None,
+    fields: Optional[Iterable[str]] = None,
+    page_size: int = 100,
+    max_records: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    return list_records(
+        resolve_table(table),
+        view=view,
+        formula=formula,
+        fields=fields,
+        page_size=page_size,
+        max_records=max_records,
+    )

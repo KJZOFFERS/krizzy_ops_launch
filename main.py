@@ -17,16 +17,9 @@ async def health():
 async def startup_event():
     try:
         post_ops("Starting KRIZZY OPS engines...")
-        app.state.engine_task = asyncio.create_task(run_engines())
+        # save tasks to prevent garbage collection
+        app.state.rei_task = asyncio.create_task(rei_dispo_engine.loop_rei())
+        app.state.govcon_task = asyncio.create_task(govcon_subtrap_engine.loop_govcon())
+        app.state.watchdog_task = asyncio.create_task(heartbeat())
     except Exception as e:
         post_error(f"Startup event failed: {e}")
-
-async def run_engines():
-    try:
-        await asyncio.gather(
-            rei_dispo_engine.loop_rei(),
-            govcon_subtrap_engine.loop_govcon(),
-            heartbeat()
-        )
-    except Exception as e:
-        post_error(f"Engine loop failure: {e}")

@@ -1,20 +1,9 @@
-from .airtable_utils import (
-    list_records,
-    create_record,
-    update_record,
-    upsert_record,
-    safe_airtable_write,
-)
-from .discord_utils import post_ops, post_error, send_message  # convenience re-exports
+fastapi>=0.115
+uvicorn[standard]>=0.30
+httpx>=0.27,<0.28
+aiohttp>=3.9
+twilio>=8.10
+python-dotenv>=1.0
+pydantic>=2.7
 
-__all__ = [
-    "list_records",
-    "create_record",
-    "update_record",
-    "upsert_record",
-    "safe_airtable_write",
-    "post_ops",
-    "post_error",
-    "send_message",
-]
 

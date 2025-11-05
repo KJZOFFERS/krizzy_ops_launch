@@ -1,7 +1,6 @@
-# FILE: requirements.txt
-fastapi==0.121.0
-uvicorn[standard]==0.38.0
-httpx==0.27.2
-pydantic==2.12.3
-python-dotenv==1.2.1
-twilio==9.3.1
+fastapi>=0.115
+uvicorn[standard]>=0.30
+httpx>=0.27,<0.28
+pydantic>=2.7
+uvloop>=0.20
+python-dotenv>=1.0

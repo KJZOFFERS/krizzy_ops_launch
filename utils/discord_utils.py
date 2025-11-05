@@ -1,7 +1,4 @@
-
 import aiohttp, asyncio, logging, os
-from utils.safe import safe_run
-from config import *
 
 OPS_WEBHOOK = os.getenv("DISCORD_OPS_WEBHOOK")
 ERROR_WEBHOOK = os.getenv("DISCORD_ERROR_WEBHOOK")

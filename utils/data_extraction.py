@@ -1,14 +1,13 @@
-
-import aiohttp, asyncio
-from utils.airtable_utils import safe_airtable_write
+# FILE: data_extraction.py
+import httpx
 from utils.discord_utils import post_error
 
 async def extract_data(url: str):
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                data = await response.text()
-                return data
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            return r.text
     except Exception as e:
         post_error(f"Data extraction failed: {e}")
         return None

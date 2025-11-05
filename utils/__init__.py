@@ -1,13 +1,11 @@
 # utils/__init__.py
-from .airtable_utils import (
-    list_records,
-    create_record,
-    update_record,
-    kpi_log,
-    now_iso,
-)
+# Avoid boot-time import failures by not importing heavy submodules eagerly.
 
-from .discord_utils import (
-    post_ops,
-    post_error,
-)
+__all__ = ["list_records"]
+
+def __getattr__(name: str):
+    if name == "list_records":
+        from .airtable_utils import list_records
+        return list_records
+    raise AttributeError(name)
+

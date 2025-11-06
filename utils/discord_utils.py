@@ -1,33 +1,25 @@
-# FILE: utils/discord_utils.py
-from __future__ import annotations
-import httpx, os
+import json, os, urllib.request
 
-try:
-    from config import CFG
-except Exception:
-    CFG = None
+OPS_URL = os.getenv("DISCORD_OPS_WEBHOOK_URL", "")
+ERR_URL = os.getenv("DISCORD_ERRORS_WEBHOOK_URL", "")
 
-def _targets(kind: str) -> list[str]:
-    if CFG:
-        if kind == "ops" and CFG.DISCORD_WEBHOOK_OPS:
-            return CFG.DISCORD_WEBHOOK_OPS
-        if kind == "errors" and CFG.DISCORD_WEBHOOK_ERRORS:
-            return CFG.DISCORD_WEBHOOK_ERRORS
-    env = "DISCORD_OPS_WEBHOOK_URL" if kind == "ops" else "DISCORD_ERRORS_WEBHOOK_URL"
-    v = os.getenv(env, "")
-    return [v] if v else []
+def _mask(s: str) -> str:
+    if not s: return s
+    for k in ("OPENAI_API_KEY","AIRTABLE_API_KEY"):
+        v = os.getenv(k)
+        if v: s = s.replace(v, "[REDACTED]")
+    return s
 
 def _post(url: str, content: str):
+    if not url: return
+    body = json.dumps({"content": content}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
     try:
-        with httpx.Client(timeout=10) as c:
-            c.post(url, json={"content": content})
+        with urllib.request.urlopen(req, timeout=8):
+            pass
     except Exception:
-        pass  # never block app on Discord failure
+        pass
 
-def post_ops(msg: str):
-    for u in _targets("ops"):
-        _post(u, msg)
-
-def post_error(msg: str):
-    for u in _targets("errors"):
-        _post(u, f"❗ {msg}")
+def post_ops(msg: str): _post(OPS_URL, _mask(msg))
+def post_error(msg: str): _post(ERR_URL, _mask(f":warning: {msg}"))

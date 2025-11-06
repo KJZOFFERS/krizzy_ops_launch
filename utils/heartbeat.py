@@ -1,14 +1,12 @@
-import os
-import time
+import os, time
 from .discord_utils import post_ops
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "krizzy_ops_web")
 
 def heartbeat() -> dict:
     ts = int(time.time())
-    msg = f"{SERVICE_NAME} heartbeat {ts}"
     try:
-        post_ops(msg)
+        post_ops(f"{SERVICE_NAME} heartbeat {ts}")
     except Exception:
         pass
     return {"ok": True, "ts": ts, "service": SERVICE_NAME}

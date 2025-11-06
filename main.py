@@ -2,26 +2,19 @@ import os
 from fastapi import FastAPI, HTTPException, Request
 from utils.discord_utils import post_ops, post_error
 from utils import list_records, upsert_record, heartbeat
-from utils.router import handle_command   # <─ add this
+from utils.router import handle_command    # add this
 
-# ─────────────────────────────────────────────
-# CONFIG
 SERVICE_NAME = os.getenv("SERVICE_NAME", "krizzy_ops_web")
 AT_TABLE_LEADS = os.getenv("AT_TABLE_LEADS_REI", "Leads_REI")
 AT_TABLE_BUYERS = os.getenv("AT_TABLE_BUYERS", "Buyers")
 
-# ─────────────────────────────────────────────
-# APP
 app = FastAPI(title="KRIZZY OPS Web")
 
 # ─────────────────────────────────────────────
-# HEALTH ENDPOINT
 @app.get("/health")
 def health():
     return {"status": "healthy", "service": SERVICE_NAME}
 
-# ─────────────────────────────────────────────
-# STARTUP
 @app.on_event("startup")
 def on_startup():
     try:
@@ -31,12 +24,11 @@ def on_startup():
         post_error(f"startup error: {e}")
 
 # ─────────────────────────────────────────────
-# UNIVERSAL COMMAND ROUTER
 @app.post("/command")
 async def command(req: Request):
     """
     Central AI command endpoint.
-    Accepts structured prompts like:
+    Example body:
     {"input": "STRAT: test all engines"}
     """
     data = await req.json()
@@ -51,7 +43,6 @@ async def command(req: Request):
         raise HTTPException(status_code=500, detail="command failed")
 
 # ─────────────────────────────────────────────
-# LEAD INGESTION
 @app.post("/ingest/lead")
 def ingest_lead(payload: dict):
     if not isinstance(payload, dict):
@@ -65,13 +56,8 @@ def ingest_lead(payload: dict):
         post_error(f"/ingest/lead failed: {e}")
         raise HTTPException(status_code=500, detail="ingest failed")
 
-# ─────────────────────────────────────────────
-# BUYER MATCHING
 @app.get("/match/buyers/{zip_code}")
 def match_buyers(zip_code: str, ask: float = 0):
-    """
-    Returns up to 10 buyers in Airtable matching ZIP and budget.
-    """
     formula = (
         f"AND({{opted_out}} != 1, "
         f"{{zip}} = '{zip_code}', "

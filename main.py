@@ -1,8 +1,9 @@
 import os
 from fastapi import FastAPI, HTTPException, Request
 from utils.discord_utils import post_ops, post_error
-from utils import list_records, upsert_record, heartbeat
-from utils.router import handle_command    # add this
+from utils import list_records, upsert_record
+from utils.heartbeat import heartbeat
+from utils.router import handle_command
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "krizzy_ops_web")
 AT_TABLE_LEADS = os.getenv("AT_TABLE_LEADS_REI", "Leads_REI")
@@ -10,7 +11,6 @@ AT_TABLE_BUYERS = os.getenv("AT_TABLE_BUYERS", "Buyers")
 
 app = FastAPI(title="KRIZZY OPS Web")
 
-# ─────────────────────────────────────────────
 @app.get("/health")
 def health():
     return {"status": "healthy", "service": SERVICE_NAME}
@@ -23,14 +23,8 @@ def on_startup():
     except Exception as e:
         post_error(f"startup error: {e}")
 
-# ─────────────────────────────────────────────
 @app.post("/command")
 async def command(req: Request):
-    """
-    Central AI command endpoint.
-    Example body:
-    {"input": "STRAT: test all engines"}
-    """
     data = await req.json()
     text = data.get("input")
     if not text:
@@ -42,7 +36,6 @@ async def command(req: Request):
         post_error(f"/command failed: {e}")
         raise HTTPException(status_code=500, detail="command failed")
 
-# ─────────────────────────────────────────────
 @app.post("/ingest/lead")
 def ingest_lead(payload: dict):
     if not isinstance(payload, dict):

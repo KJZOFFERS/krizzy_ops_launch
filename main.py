@@ -1,19 +1,59 @@
-import os
+import os, time
+from typing import Optional, Dict
 from fastapi import FastAPI, HTTPException, Request, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from utils.discord_utils import post_ops, post_error
 from utils import list_records, upsert_record
 from utils.heartbeat import heartbeat
 from utils.router import handle_command
+from utils.airtable_utils import ping as airtable_ping
+from utils.metrics import track
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
-SERVICE_NAME = os.getenv("SERVICE_NAME", "krizzy_ops_web")
+SERVICE_NAME   = os.getenv("SERVICE_NAME", "krizzy_ops_web")
 AT_TABLE_LEADS = os.getenv("AT_TABLE_LEADS_REI", "Leads_REI")
-AT_TABLE_BUYERS = os.getenv("AT_TABLE_BUYERS", "Buyers")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
+AT_TABLE_BUYERS= os.getenv("AT_TABLE_BUYERS", "Buyers")
+ADMIN_TOKEN    = os.getenv("ADMIN_TOKEN", "").strip()
+GIT_SHA        = os.getenv("GIT_SHA", "unknown")
+DEPLOYED_AT    = os.getenv("DEPLOYED_AT", "")
 
 app = FastAPI(title="KRIZZY OPS Web")
 
-def _enforce_token(req: Request, token_param: str | None):
+# --- Security + logging headers
+@app.middleware("http")
+async def harden(request: Request, call_next):
+    start = time.time()
+    rid = request.headers.get("X-Request-Id", f"req-{int(start*1000)}")
+    try:
+        response: Response = await call_next(request)
+        code = response.status_code
+    except Exception as e:
+        post_error(f"unhandled: {e}")
+        raise
+    # headers
+    response.headers["X-Request-Id"] = rid
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    # metrics
+    finalize = track(request.url.path, request.method)
+    finalize(code)
+    return response
+
+# --- Simple in-memory rate limit (per IP, burst 20, refill ~1/sec)
+_BUCKETS: Dict[str, Dict[str, float]] = {}
+def _rate_limit(key: str, cost: float = 1.0):
+    now = time.time()
+    b = _BUCKETS.get(key, {"tokens": 20.0, "ts": now})
+    # refill
+    b["tokens"] = min(20.0, b["tokens"] + (now - b["ts"]) * 1.0)
+    b["ts"] = now
+    if b["tokens"] < cost:
+        raise HTTPException(status_code=429, detail="rate limit")
+    b["tokens"] -= cost
+    _BUCKETS[key] = b
+
+def _enforce_token(req: Request, token_param: Optional[str]):
     if not ADMIN_TOKEN:
         return
     supplied = req.headers.get("X-Admin-Token") or token_param or ""
@@ -22,25 +62,34 @@ def _enforce_token(req: Request, token_param: str | None):
 
 @app.get("/")
 def index():
-    return {"ok": True, "service": SERVICE_NAME,
-            "routes": ["/health", "/command", "/ingest/lead", "/match/buyers/{zip}", "/control"]}
+    return {"ok": True, "service": SERVICE_NAME, "version": GIT_SHA, "deployed_at": DEPLOYED_AT,
+            "routes": ["/health","/ready","/metrics","/command","/ingest/lead","/match/buyers/{zip}","/control"]}
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "service": SERVICE_NAME}
+    return {"status":"healthy","service":SERVICE_NAME}
+
+@app.get("/ready")
+def ready():
+    ok = airtable_ping(AT_TABLE_LEADS)
+    return {"ready": ok, "service": SERVICE_NAME}
+
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.on_event("startup")
 def on_startup():
     try:
-        post_ops(f"{SERVICE_NAME} boot OK")
+        post_ops(f"{SERVICE_NAME} boot OK @ {GIT_SHA or 'dev'}")
         heartbeat()
     except Exception as e:
         post_error(f"startup error: {e}")
 
-# Command router (POST/GET; token in header or query)
-@app.api_route("/command", methods=["POST", "GET"])
-@app.api_route("/command/", methods=["POST", "GET"])
-async def command(req: Request, input: str | None = Query(default=None), token: str | None = Query(default=None)):
+@app.api_route("/command", methods=["POST","GET"])
+@app.api_route("/command/", methods=["POST","GET"])
+async def command(req: Request, input: Optional[str] = Query(default=None), token: Optional[str] = Query(default=None)):
+    _rate_limit(req.client.host + ":cmd")
     _enforce_token(req, token)
     text = None
     if req.method == "POST":
@@ -60,9 +109,9 @@ async def command(req: Request, input: str | None = Query(default=None), token: 
         post_error(f"/command failed: {e}")
         raise HTTPException(status_code=500, detail="command failed")
 
-# Lead ingest (token-gated)
 @app.post("/ingest/lead")
-def ingest_lead(req: Request, payload: dict, token: str | None = Query(default=None)):
+def ingest_lead(req: Request, payload: dict, token: Optional[str] = Query(default=None)):
+    _rate_limit(req.client.host + ":ingest")
     _enforce_token(req, token)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON body required")
@@ -75,9 +124,9 @@ def ingest_lead(req: Request, payload: dict, token: str | None = Query(default=N
         post_error(f"/ingest/lead failed: {e}")
         raise HTTPException(status_code=500, detail="ingest failed")
 
-# Buyer match (token-gated)
 @app.get("/match/buyers/{zip_code}")
-def match_buyers(req: Request, zip_code: str, ask: float = 0, token: str | None = Query(default=None)):
+def match_buyers(req: Request, zip_code: str, ask: float = 0, token: Optional[str] = Query(default=None)):
+    _rate_limit(req.client.host + ":match")
     _enforce_token(req, token)
     formula = (
         f"AND({{opted_out}} != 1, "
@@ -92,12 +141,10 @@ def match_buyers(req: Request, zip_code: str, ask: float = 0, token: str | None 
         post_error(f"/match/buyers failed: {e}")
         raise HTTPException(status_code=500, detail="match failed")
 
-# Minimal web console (paste token each time; no storage)
 @app.get("/control", response_class=HTMLResponse)
 def control():
     return """
-<!doctype html><meta charset="utf-8">
-<title>KRIZZY OPS Control</title>
+<!doctype html><meta charset="utf-8"><title>KRIZZY OPS Control</title>
 <style>body{font-family:ui-sans-serif,system-ui;margin:40px;max-width:720px}
 input,textarea,button{font:inherit;padding:8px;margin:6px 0;width:100%}pre{white-space:pre-wrap;border:1px solid #ddd;padding:12px}</style>
 <h2>KRIZZY OPS Control</h2>

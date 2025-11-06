@@ -1,23 +1,30 @@
-import os, json, logging, requests
-
-AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
-AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-
-def _headers():
-    return {"Authorization": f"Bearer {AIRTABLE_API_KEY}", "Content-Type": "application/json"}
-
-def fetch_table(table_name: str):
-    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{table_name}"
-    r = requests.get(url, headers=_headers(), timeout=10)
-    r.raise_for_status()
-    return r.json().get("records", [])
-
-def safe_airtable_write(table_name: str, record: dict):
+from __future__ import annotations
+from typing import Any, Dict, Optional
+from loguru import logger
+try:
+    from pyairtable import Table
+except Exception:
+    Table = None  # offline
+def _table(api_key: str, base_id: str, table_name: str):
+    if Table is None:
+        raise RuntimeError("pyairtable not available offline")
+    return Table(api_key, base_id, table_name)
+def fetch_table(api_key: str, base_id: str, table_name: str, view: Optional[str] = None, formula: Optional[str] = None) -> list[dict]:
     try:
-        url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{table_name}"
-        r = requests.post(url, headers=_headers(), data=json.dumps({"fields": record}), timeout=10)
-        r.raise_for_status()
-        return True
+        t = _table(api_key, base_id, table_name)
+        return t.all(view=view, formula=formula)
     except Exception as e:
-        logging.error(f"Airtable write failed: {e}")
+        logger.debug(f"Airtable fetch skipped/offline: {e}")
+        return []
+def create_record(api_key: str, base_id: str, table_name: str, fields: Dict[str, Any]) -> Optional[dict]:
+    try:
+        t = _table(api_key, base_id, table_name)
+        return t.create(fields)
+    except Exception as e:
+        logger.debug(f"Airtable write skipped/offline: {e}")
+        return None
+def safe_airtable_write(api_key: Optional[str], base_id: Optional[str], table_name: str, fields: Dict[str, Any]) -> bool:
+    if not api_key or not base_id or Table is None:
+        logger.debug("Airtable not configured or offline. Skipping write.")
         return False
+    return create_record(api_key, base_id, table_name, fields) is not None

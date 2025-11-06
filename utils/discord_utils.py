@@ -1,22 +1,21 @@
-import aiohttp, asyncio, logging, os
-
-OPS_WEBHOOK = os.getenv("DISCORD_OPS_WEBHOOK")
-ERROR_WEBHOOK = os.getenv("DISCORD_ERROR_WEBHOOK")
-
-async def _do(url: str, payload: dict):
+from __future__ import annotations
+from typing import Optional
+from loguru import logger
+try:
+    import httpx  # type: ignore
+except Exception:
+    httpx = None
+async def send_discord_message(webhook_url: Optional[str], content: str, embeds: list[dict] | None = None) -> bool:
+    if not webhook_url or httpx is None:
+        logger.debug("Discord send skipped (no webhook or offline).")
+        return False
+    payload = {"content": content}
+    if embeds:
+        payload["embeds"] = embeds
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as r:
-                return await r.text()
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(webhook_url, json=payload)
+            return r.status_code < 400
     except Exception as e:
-        logging.error(f"Discord post failed: {e}")
-        return None
-
-def post_ops(msg: str):
-    asyncio.create_task(_do(OPS_WEBHOOK, {"content": msg}))
-
-def post_error(msg: str):
-    asyncio.create_task(_do(ERROR_WEBHOOK, {"content": msg}))
-
-def send_message(url: str, msg: str):
-    asyncio.create_task(_do(url, {"content": msg}))
+        logger.debug(f"Discord send failed/offline: {e}")
+        return False

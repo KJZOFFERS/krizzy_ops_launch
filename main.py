@@ -1,5 +1,7 @@
 import os
 from fastapi import FastAPI, HTTPException, Request, Query
+from config.env_alias import apply_env_aliases
+from config.validate_env import validate_env
 from utils.discord_utils import post_ops, post_error
 from utils import list_records, upsert_record
 from utils.heartbeat import heartbeat
@@ -11,55 +13,45 @@ AT_TABLE_BUYERS = os.getenv("AT_TABLE_BUYERS", "Buyers")
 
 app = FastAPI(title="KRIZZY OPS Web")
 
-# Root
 @app.get("/")
 def index():
-    return {
-        "ok": True,
-        "service": SERVICE_NAME,
-        "routes": ["/health", "/command", "/ingest/lead", "/match/buyers/{zip}"],
-    }
+    return {"ok": True, "service": SERVICE_NAME,
+            "routes": ["/health", "/command", "/ingest/lead", "/match/buyers/{zip}"]}
 
-# Health
 @app.get("/health")
 def health():
     return {"status": "healthy", "service": SERVICE_NAME}
 
-# Startup
 @app.on_event("startup")
 def on_startup():
+    apply_env_aliases()
+    validate_env()
     try:
         post_ops(f"{SERVICE_NAME} boot OK")
         heartbeat()
     except Exception as e:
         post_error(f"startup error: {e}")
 
-# Command router (POST and GET, with and without trailing slash)
-@app.api_route("/command", methods=["POST", "GET"])
-@app.api_route("/command/", methods=["POST", "GET"])
-async def command(req: Request | None = None, input: str | None = Query(default=None)):
-    # Prefer POST body; fall back to GET ?input=
+@app.api_route("/command", methods=["POST","GET"])
+@app.api_route("/command/", methods=["POST","GET"])
+async def command(req: Request, input: str | None = Query(default=None)):
     text = None
-    if req and req.method == "POST":
+    if req.method == "POST":
         try:
             data = await req.json()
             text = data.get("input")
         except Exception:
-            text = None
+            pass
     if text is None:
         text = input
-
     if not text:
         raise HTTPException(status_code=400, detail="Missing input")
-
     try:
-        result = handle_command(text)
-        return {"ok": True, "input": text, "result": result}
+        return {"ok": True, "input": text, "result": handle_command(text)}
     except Exception as e:
         post_error(f"/command failed: {e}")
         raise HTTPException(status_code=500, detail="command failed")
 
-# Lead ingest
 @app.post("/ingest/lead")
 def ingest_lead(payload: dict):
     if not isinstance(payload, dict):
@@ -73,7 +65,6 @@ def ingest_lead(payload: dict):
         post_error(f"/ingest/lead failed: {e}")
         raise HTTPException(status_code=500, detail="ingest failed")
 
-# Buyer match
 @app.get("/match/buyers/{zip_code}")
 def match_buyers(zip_code: str, ask: float = 0):
     formula = (
@@ -83,11 +74,7 @@ def match_buyers(zip_code: str, ask: float = 0):
     )
     try:
         recs = list_records(AT_TABLE_BUYERS, formula=formula, max_records=10)
-        phones = [
-            r.get("fields", {}).get("phone")
-            for r in recs
-            if r.get("fields", {}).get("phone")
-        ]
+        phones = [r.get("fields", {}).get("phone") for r in recs if r.get("fields", {}).get("phone")]
         return {"buyers": phones[:10]}
     except Exception as e:
         post_error(f"/match/buyers failed: {e}")

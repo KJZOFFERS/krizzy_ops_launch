@@ -1,87 +1,44 @@
-from __future__ import annotations
-import os
-import json
-from typing import Iterable, Optional, Dict, Any, List
-from urllib.parse import quote
-import httpx
+import json, os, urllib.parse, urllib.request
 
-_API = "https://api.airtable.com/v0"
+API_KEY = os.getenv("AIRTABLE_API_KEY", "")
+BASE_ID = os.getenv("AIRTABLE_BASE_ID", "")
 
-def _env(name: str) -> str:
-    v = os.getenv(name)
-    if not v:
-        raise RuntimeError(f"{name} is not set")
-    return v
+def _endpoint(table: str) -> str:
+    return f"https://api.airtable.com/v0/{BASE_ID}/{urllib.parse.quote(table)}"
 
-def _headers() -> Dict[str, str]:
-    return {
-        "Authorization": f"Bearer {_env('AIRTABLE_API_KEY')}",
-        "Content-Type": "application/json",
-    }
+def _headers():
+    return {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
-def _table_url(table: str) -> str:
-    base = _env("AIRTABLE_BASE_ID")
-    return f"{_API}/{quote(base)}/{quote(table)}"
-
-def list_records(
-    table: str,
-    fields: Optional[Iterable[str]] = None,
-    formula: Optional[str] = None,
-    max_records: Optional[int] = None,
-) -> List[Dict[str, Any]]:
-    params: Dict[str, Any] = {}
-    if fields:
-        params["fields[]"] = list(fields)
+def list_records(table: str, formula: str | None = None, max_records: int = 10):
+    params = {}
     if formula:
         params["filterByFormula"] = formula
     if max_records:
-        params["maxRecords"] = max_records
+        params["pageSize"] = max_records
+    url = _endpoint(table) + ("?" + urllib.parse.urlencode(params) if params else "")
+    req = urllib.request.Request(url, headers=_headers(), method="GET")
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read().decode())
+    return data.get("records", [])
 
-    out: List[Dict[str, Any]] = []
-    offset: Optional[str] = None
-    with httpx.Client(timeout=15) as c:
-        while True:
-            qp = params.copy()
-            if offset:
-                qp["offset"] = offset
-            r = c.get(_table_url(table), headers=_headers(), params=qp)
-            r.raise_for_status()
-            data = r.json()
-            out.extend(data.get("records", []))
-            if max_records and len(out) >= max_records:
-                return out[:max_records]
-            offset = data.get("offset")
-            if not offset:
-                return out
+def _find_by_key(table: str, key_field: str, key_value: str):
+    # Escape double quotes inside value
+    val = str(key_value).replace('"', '\\"')
+    formula = f'{{{key_field}}} = "{val}"'
+    recs = list_records(table, formula=formula, max_records=1)
+    return recs[0] if recs else None
 
-def create_record(table: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-    url = _table_url(table)
-    with httpx.Client(timeout=15) as c:
-        r = c.post(url, headers=_headers(), json={"fields": fields})
-        r.raise_for_status()
-        return r.json()
-
-def update_record(table: str, record_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-    url = f"{_table_url(table)}/{record_id}"
-    with httpx.Client(timeout=15) as c:
-        r = c.patch(url, headers=_headers(), json={"fields": fields})
-        r.raise_for_status()
-        return r.json()
-
-def upsert_record(table: str, key_field: str, key_value: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-    # Build a safe Airtable formula without backslash gymnastics
-    # json.dumps returns a double-quoted, safely-escaped JSON string literal
-    value_json = json.dumps(key_value)
-    formula = f"{{{key_field}}} = {value_json}"
-
-    existing = list_records(table, formula=formula, max_records=1)
-    if existing:
-        rid = existing[0]["id"]
-        return update_record(table, rid, fields)
-    return create_record(table, {**fields, key_field: key_value})
-
-    try:
-        return create_record(table, fields)
-    except Exception:
-        return None
+def upsert_record(table: str, key_field: str, key_value: str, payload: dict):
+    found = _find_by_key(table, key_field, key_value)
+    if found:
+        rec_id = found["id"]
+        url = _endpoint(table) + "/" + rec_id
+        body = json.dumps({"fields": payload}).encode("utf-8")
+        req = urllib.request.Request(url, headers=_headers(), data=body, method="PATCH")
+    else:
+        url = _endpoint(table)
+        body = json.dumps({"fields": payload}).encode("utf-8")
+        req = urllib.request.Request(url, headers=_headers(), data=body, method="POST")
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read().decode())
 

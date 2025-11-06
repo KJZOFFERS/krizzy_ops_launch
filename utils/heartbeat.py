@@ -10,6 +10,5 @@ def heartbeat() -> dict:
     try:
         post_ops(msg)
     except Exception:
-        # keep startup non-fatal if webhook is absent
         pass
     return {"ok": True, "ts": ts, "service": SERVICE_NAME}

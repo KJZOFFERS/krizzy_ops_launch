@@ -67,4 +67,3 @@ def match_buyers(zip_code: str, ask: float = 0):
     except Exception as e:
         post_error(f"/match/buyers failed: {e}")
         raise HTTPException(status_code=500, detail="match failed")
-

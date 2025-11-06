@@ -1,16 +1,19 @@
-# KRIZZY OPS Web (Single-Service)
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 
-One web process with FastAPI + Uvicorn. Healthcheck at `/health`. Optional Discord + Airtable KPI logging (safe no-op if envs missing).
+# set envs (see .env.example below)
+export SERVICE_NAME=krizzy_ops_web
+export ADMIN_TOKEN=replace-me
+export DISCORD_OPS_WEBHOOK_URL=...
+export DISCORD_ERRORS_WEBHOOK_URL=...
+export AIRTABLE_API_KEY=...
+export AIRTABLE_BASE_ID=appXXXXXXXXXXXXXX
+export AT_TABLE_LEADS_REI=Leads_REI
+export AT_TABLE_BUYERS=Buyers
+export AT_TABLE_GOVCON=GovCon_Opportunities
+export AT_TABLE_KPI=KPI_Log
+export OPENAI_API_KEY=...
+export OPENAI_MODEL=gpt-4o-mini
+export OPENAI_TIMEOUT_S=20
 
-## Quick start (Railway)
-
-1) Create project → Add service (from repo or template).
-2) Add **variables** from `.env.example`:
-   - AIRTABLE_API_KEY, AIRTABLE_BASE_ID (if you want KPI logging)
-   - DISCORD_WEBHOOK_OPS, DISCORD_WEBHOOK_ERRORS (optional)
-   - SERVICE_NAME=krizzy_ops_web
-   - ENV=production
-3) Confirm **Procfile** is detected and `railway.json` healthcheck is `/health`.
-4) Deploy. Service is healthy when GET `/health` returns:
-   ```json
-   {"status":"healthy","service":"krizzy_ops_web"}
+uvicorn main:app --host 0.0.0.0 --port 8080

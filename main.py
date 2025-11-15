@@ -175,6 +175,7 @@ def _validate_required_env() -> Dict[str, Any]:
     """
     Validates required environment variables and returns readiness status.
     Returns dict with 'ready' bool and 'missing' list of missing systems.
+    Never raises exceptions.
     """
     missing = []
     
@@ -184,12 +185,11 @@ def _validate_required_env() -> Dict[str, Any]:
     if not Config.TWILIO_ACCOUNT_SID or not Config.TWILIO_AUTH_TOKEN or not Config.TWILIO_MESSAGING_SERVICE_SID:
         missing.append("twilio")
     
-    # Discord is optional but warn if missing
     if not Config.DISCORD_WEBHOOK_OPS:
         missing.append("discord")
     
     return {
-        "ready": len(missing) == 0 or (len(missing) == 1 and "discord" in missing),
+        "ready": len(missing) == 0,
         "missing": missing
     }
 
@@ -246,21 +246,46 @@ def run_rei_dispo_batch(max_records: int = 50) -> Dict[str, Any]:
     - Sends SMS via Twilio
     - Updates Status + Last_Touched_At + Last_Result
     - Logs KPI + Discord
+    
+    Returns structured JSON even on env errors - never crashes.
     """
     discord = get_discord()
     
-    # Validate env before creating clients
+    # Validate required systems: airtable, twilio, discord
     validation = _validate_required_env()
-    if not validation["ready"]:
-        error_msg = f"[REI_DISPO] Missing required env vars: {', '.join(validation['missing'])}"
-        discord.send(error_msg, is_error=True)
-        raise ValueError(error_msg)
+    required_systems = {"airtable", "twilio", "discord"}
+    missing_required = [sys for sys in validation["missing"] if sys in required_systems]
     
+    if missing_required:
+        error_msg = f"[REI_DISPO] Missing required env vars: {', '.join(missing_required)}"
+        discord.send(error_msg, is_error=True)
+        logger.error(error_msg)
+        return {
+            "engine": "REI_DISPO_ENGINE",
+            "status": "env_error",
+            "missing_systems": missing_required,
+            "total_pulled": 0,
+            "sent": 0,
+            "errors": 0,
+            "error_examples": [error_msg]
+        }
+    
+    # Wrap Airtable client initialization
     try:
         airtable = get_airtable()
     except ValueError as e:
-        discord.send(f"[REI_DISPO] Failed to initialize Airtable client: {e}", is_error=True)
-        raise
+        error_msg = f"[REI_DISPO] Failed to initialize Airtable client: {e}"
+        discord.send(error_msg, is_error=True)
+        logger.error(error_msg)
+        return {
+            "engine": "REI_DISPO_ENGINE",
+            "status": "env_error",
+            "missing_systems": ["airtable"],
+            "total_pulled": 0,
+            "sent": 0,
+            "errors": 0,
+            "error_examples": [error_msg]
+        }
 
     status_field = Config.REI_STATUS_FIELD
     phone_field = Config.REI_PHONE_FIELD
@@ -269,7 +294,6 @@ def run_rei_dispo_batch(max_records: int = 50) -> Dict[str, Any]:
     last_result_field = Config.REI_LAST_RESULT_FIELD
 
     # Updated filter: exclude leads already successfully texted (Last_Result = SMS_SENT)
-    # This prevents duplicate SMS even if Airtable status update failed
     filter_formula = (
         f"AND("
         f"{{{status_field}}}='{Config.REI_STATUS_NEW_VALUE}', "
@@ -285,14 +309,34 @@ def run_rei_dispo_batch(max_records: int = 50) -> Dict[str, Any]:
             max_records=max_records,
         )
     except Exception as e:
-        discord.send(f"[REI_DISPO] Failed to pull leads: {e}", is_error=True)
-        raise
+        error_msg = f"[REI_DISPO] Failed to pull leads: {e}"
+        discord.send(error_msg, is_error=True)
+        logger.error(error_msg)
+        return {
+            "engine": "REI_DISPO_ENGINE",
+            "status": "query_error",
+            "total_pulled": 0,
+            "sent": 0,
+            "errors": 1,
+            "error_examples": [error_msg]
+        }
 
+    # Wrap Twilio client initialization
     try:
         twilio = get_twilio()
     except ValueError as e:
-        discord.send(f"[REI_DISPO] Failed to initialize Twilio client: {e}", is_error=True)
-        raise
+        error_msg = f"[REI_DISPO] Failed to initialize Twilio client: {e}"
+        discord.send(error_msg, is_error=True)
+        logger.error(error_msg)
+        return {
+            "engine": "REI_DISPO_ENGINE",
+            "status": "env_error",
+            "missing_systems": ["twilio"],
+            "total_pulled": len(records),
+            "sent": 0,
+            "errors": 0,
+            "error_examples": [error_msg]
+        }
 
     sent = 0
     errors = 0
@@ -310,7 +354,6 @@ def run_rei_dispo_batch(max_records: int = 50) -> Dict[str, Any]:
         name = fields.get(name_field) or ""
         template = Config.REI_SMS_TEMPLATE
         try:
-            # Allow {name} and {space} tokens; ignore missing keys
             body = template.format_map(defaultdict(str, name=name, space=space))
         except Exception:
             body = template.replace("{name}", name).replace("{space}", space)
@@ -329,7 +372,6 @@ def run_rei_dispo_batch(max_records: int = 50) -> Dict[str, Any]:
                     last_result_field: "SMS_SENT",
                 },
             )
-            # light throttle for Twilio / deliverability
             time.sleep(0.5)
         except Exception as e:
             errors += 1
@@ -340,6 +382,7 @@ def run_rei_dispo_batch(max_records: int = 50) -> Dict[str, Any]:
 
     summary = {
         "engine": "REI_DISPO_ENGINE",
+        "status": "success",
         "total_pulled": len(records),
         "sent": sent,
         "errors": errors,
@@ -372,21 +415,42 @@ def run_govcon_digest(max_records: int = 10, window_days: int = 7) -> Dict[str, 
     - Sends Discord digest
     - Marks opps as DIGESTED
     - Logs KPI
+    
+    Returns structured JSON even on env errors - never crashes.
     """
     discord = get_discord()
     
-    # Validate env before creating clients
+    # Validate required systems: airtable, discord (Twilio not needed for GovCon)
     validation = _validate_required_env()
-    if not validation["ready"]:
-        error_msg = f"[GOVCON_SUBTRAP] Missing required env vars: {', '.join(validation['missing'])}"
-        discord.send(error_msg, is_error=True)
-        raise ValueError(error_msg)
+    required_systems = {"airtable", "discord"}
+    missing_required = [sys for sys in validation["missing"] if sys in required_systems]
     
+    if missing_required:
+        error_msg = f"[GOVCON_SUBTRAP] Missing required env vars: {', '.join(missing_required)}"
+        discord.send(error_msg, is_error=True)
+        logger.error(error_msg)
+        return {
+            "engine": "GOVCON_SUBTRAP_ENGINE",
+            "status": "env_error",
+            "missing_systems": missing_required,
+            "pulled": 0,
+            "marked_digest": 0
+        }
+    
+    # Wrap Airtable client initialization
     try:
         airtable = get_airtable()
     except ValueError as e:
-        discord.send(f"[GOVCON_SUBTRAP] Failed to initialize Airtable client: {e}", is_error=True)
-        raise
+        error_msg = f"[GOVCON_SUBTRAP] Failed to initialize Airtable client: {e}"
+        discord.send(error_msg, is_error=True)
+        logger.error(error_msg)
+        return {
+            "engine": "GOVCON_SUBTRAP_ENGINE",
+            "status": "env_error",
+            "missing_systems": ["airtable"],
+            "pulled": 0,
+            "marked_digest": 0
+        }
 
     status_field = Config.GOVCON_STATUS_FIELD
     due_field = Config.GOVCON_DUE_DATE_FIELD
@@ -395,7 +459,6 @@ def run_govcon_digest(max_records: int = 10, window_days: int = 7) -> Dict[str, 
     sol_field = Config.GOVCON_SOL_FIELD
     url_field = Config.GOVCON_URL_FIELD
 
-    # AND(Status='NEW', Due_Date >= TODAY(), Due_Date <= DATEADD(TODAY(), window_days, 'days'))
     filter_formula = (
         f"AND("
         f"{{{status_field}}}='{Config.GOVCON_STATUS_NEW_VALUE}', "
@@ -411,8 +474,15 @@ def run_govcon_digest(max_records: int = 10, window_days: int = 7) -> Dict[str, 
             max_records=max_records,
         )
     except Exception as e:
-        discord.send(f"[GOVCON_SUBTRAP] Failed to pull opps: {e}", is_error=True)
-        raise
+        error_msg = f"[GOVCON_SUBTRAP] Failed to pull opps: {e}"
+        discord.send(error_msg, is_error=True)
+        logger.error(error_msg)
+        return {
+            "engine": "GOVCON_SUBTRAP_ENGINE",
+            "status": "query_error",
+            "pulled": 0,
+            "marked_digest": 0
+        }
 
     lines: List[str] = []
     updated = 0
@@ -464,6 +534,7 @@ def run_govcon_digest(max_records: int = 10, window_days: int = 7) -> Dict[str, 
 
     summary = {
         "engine": "GOVCON_SUBTRAP_ENGINE",
+        "status": "success",
         "pulled": len(records),
         "marked_digest": updated,
     }
@@ -475,9 +546,16 @@ app = FastAPI(title="KRIZZY OPS", version="1.0.0")
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
-    now = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+    """
+    Health check endpoint - never crashes, always returns valid JSON.
+    Returns 'ok' or 'degraded' based on env var validation.
+    """
+    try:
+        now = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+    except Exception:
+        now = "unknown"
     
-    # Improved validation - check actual env var presence
+    # Validate environment
     validation = _validate_required_env()
     
     env_ok = {
@@ -490,7 +568,6 @@ def health() -> Dict[str, Any]:
         "discord": bool(Config.DISCORD_WEBHOOK_OPS),
     }
     
-    # Status is degraded if required systems missing
     status = "ok" if validation["ready"] else "degraded"
     
     response = {
@@ -501,7 +578,6 @@ def health() -> Dict[str, Any]:
         "env": env_ok,
     }
     
-    # Add missing systems info if degraded
     if not validation["ready"]:
         response["missing_systems"] = validation["missing"]
     
@@ -510,46 +586,81 @@ def health() -> Dict[str, Any]:
 
 @app.post("/run/rei_dispo")
 def run_rei() -> Dict[str, Any]:
-    summary = run_rei_dispo_batch()
-    return summary
+    """
+    REI disposition endpoint - never crashes, always returns structured JSON.
+    """
+    try:
+        summary = run_rei_dispo_batch()
+        return summary
+    except Exception as e:
+        logger.error("[ENDPOINT] /run/rei_dispo unexpected error: %s", e)
+        return {
+            "engine": "REI_DISPO_ENGINE",
+            "status": "error",
+            "error": str(e),
+            "total_pulled": 0,
+            "sent": 0,
+            "errors": 1,
+            "error_examples": [str(e)]
+        }
 
 
 @app.post("/run/govcon_digest")
 def run_govcon() -> Dict[str, Any]:
-    summary = run_govcon_digest()
-    return summary
+    """
+    GovCon digest endpoint - never crashes, always returns structured JSON.
+    """
+    try:
+        summary = run_govcon_digest()
+        return summary
+    except Exception as e:
+        logger.error("[ENDPOINT] /run/govcon_digest unexpected error: %s", e)
+        return {
+            "engine": "GOVCON_SUBTRAP_ENGINE",
+            "status": "error",
+            "error": str(e),
+            "pulled": 0,
+            "marked_digest": 0
+        }
 
 
 @app.post("/run/all")
 def run_all() -> Dict[str, Any]:
     """
-    Executes both engines with error isolation.
-    Each engine runs independently; one failure doesn't block the other.
+    Executes both engines with complete error isolation.
+    Always returns full JSON body with both engine results.
+    Never crashes or propagates exceptions.
     """
     rei_result = {}
     govcon_result = {}
     
-    # Run REI engine with error isolation
+    # Run REI engine with full error isolation
     try:
         rei_result = run_rei_dispo_batch()
     except Exception as e:
+        logger.error("[RUN_ALL] REI engine unexpected error: %s", e)
         rei_result = {
             "engine": "REI_DISPO_ENGINE",
+            "status": "error",
             "error": str(e),
-            "success": False
+            "total_pulled": 0,
+            "sent": 0,
+            "errors": 1,
+            "error_examples": [str(e)]
         }
-        logger.error("[RUN_ALL] REI engine failed: %s", e)
     
-    # Run GovCon engine with error isolation
+    # Run GovCon engine with full error isolation
     try:
         govcon_result = run_govcon_digest()
     except Exception as e:
+        logger.error("[RUN_ALL] GovCon engine unexpected error: %s", e)
         govcon_result = {
             "engine": "GOVCON_SUBTRAP_ENGINE",
+            "status": "error",
             "error": str(e),
-            "success": False
+            "pulled": 0,
+            "marked_digest": 0
         }
-        logger.error("[RUN_ALL] GovCon engine failed: %s", e)
     
     return {"rei": rei_result, "govcon": govcon_result}
 

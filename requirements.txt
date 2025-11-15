@@ -1,1 +1,3 @@
-# No external dependencies required for krizzy_bots.py
+fastapi
+uvicorn[standard]
+requests

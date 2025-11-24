@@ -1,1 +1,1 @@
-# KRIZZY OPS service modules
+from .airtable_client import AirtableClient

@@ -1,4 +1,4 @@
- # src/common/airtable_client.py
+# src/common/airtable_client.py
 
 import os
 import time
@@ -14,6 +14,49 @@ class AirtableError(Exception):
 
 class AirtableSchemaError(AirtableError):
     """Raised when schema validation fails."""
+
+
+class AirtableTable:
+    """
+    Shim to provide pyairtable-like interface for a single table.
+    Used by get_table() to maintain compatibility with existing code.
+    """
+    
+    def __init__(self, client: 'AirtableClient', table_name: str):
+        self.client = client
+        self.table_name = table_name
+    
+    def all(self, max_records: Optional[int] = None, **kwargs) -> List[Dict[str, Any]]:
+        """Fetch all records (pyairtable-compatible)"""
+        return self.client.list_records(
+            self.table_name,
+            max_records=max_records or 100,
+            **kwargs
+        )
+    
+    def first(self, **kwargs) -> Optional[Dict[str, Any]]:
+        """Fetch first record matching criteria"""
+        filter_formula = kwargs.pop("filter_formula", kwargs.pop("formula", None))
+        if filter_formula:
+            return self.client.find_first_by_formula(
+                self.table_name,
+                filter_formula,
+                **kwargs
+            )
+        records = self.all(max_records=1, **kwargs)
+        return records[0] if records else None
+    
+    def create(self, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a record"""
+        return self.client.create_record(self.table_name, fields)
+    
+    def update(self, record_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """Update a record"""
+        return self.client.update_record(self.table_name, record_id, fields)
+    
+    def delete(self, record_id: str) -> Dict[str, Any]:
+        """Delete a record"""
+        return self.client.delete_record(self.table_name, record_id)
 
 
 class AirtableClient:
@@ -57,6 +100,7 @@ class AirtableClient:
             )
 
         self._tables_cache: Optional[List[Dict[str, Any]]] = None
+        self._field_cache: Dict[str, List[str]] = {}
 
     @property
     def _auth_headers(self) -> Dict[str, str]:
@@ -134,10 +178,22 @@ class AirtableClient:
                 return tbl
         raise AirtableSchemaError(f"Table '{table_name}' not found in Meta API")
 
-    def get_field_names(self, table_name: str) -> List[str]:
+    def get_field_names(self, table_name: str, use_cache: bool = True) -> List[str]:
+        if use_cache and table_name in self._field_cache:
+            return self._field_cache[table_name]
+        
         schema = self.get_table_schema(table_name)
         fields = schema.get("fields", [])
-        return [f.get("name") for f in fields if isinstance(f, dict)]
+        field_names = [f.get("name") for f in fields if isinstance(f, dict)]
+        self._field_cache[table_name] = field_names
+        return field_names
+
+    def get_table(self, table_name: str) -> AirtableTable:
+        """
+        Get a table shim with pyairtable-like interface.
+        Enables: client.get_table("TableName").all(max_records=50)
+        """
+        return AirtableTable(self, table_name)
 
     def list_records(
         self,
@@ -283,30 +339,89 @@ class AirtableClient:
         except Exception:
             return False
 
+    def _get_actual_field_name(self, table_name: str, preferred_names: List[str]) -> Optional[str]:
+        """Find first matching field name from preferences"""
+        actual_fields = self.get_field_names(table_name, use_cache=True)
+        for pref in preferred_names:
+            if pref in actual_fields:
+                return pref
+        return None
+
     def log_kpi(self, event_type: str, data: Dict[str, Any]) -> None:
-        """Log KPI event to KPI_Log table"""
+        """Log KPI event to KPI_Log table using actual schema"""
         try:
-            self.create_record(
+            actual_fields = self.get_field_names("KPI_Log", use_cache=True)
+            
+            # Build fields dict using actual field names
+            fields = {}
+            
+            # Find event type field
+            event_field = self._get_actual_field_name(
                 "KPI_Log",
-                {
-                    "Event Type": event_type,
-                    "Data": str(data)[:10000],
-                    "Timestamp": datetime.now(timezone.utc).isoformat(),
-                }
+                ["Event Type", "EventType", "Event", "Type", "Name"]
             )
+            if event_field:
+                fields[event_field] = event_type
+            
+            # Find data field
+            data_field = self._get_actual_field_name(
+                "KPI_Log",
+                ["Data", "Payload", "Details", "Info", "JSON"]
+            )
+            if data_field:
+                fields[data_field] = str(data)[:10000]
+            
+            # Find timestamp field
+            timestamp_field = self._get_actual_field_name(
+                "KPI_Log",
+                ["Timestamp", "Created", "Date", "Time"]
+            )
+            if timestamp_field:
+                fields[timestamp_field] = datetime.now(timezone.utc).isoformat()
+            
+            if fields:
+                self.create_record("KPI_Log", fields)
+            else:
+                print(f"[AIRTABLE] KPI_Log fields not found in schema: {actual_fields}")
+        
         except Exception as e:
             print(f"[AIRTABLE] Failed to log KPI: {e}")
 
     def log_crack(self, service: str, error: str) -> None:
-        """Log crack/error to Cracks_Tracker table"""
+        """Log crack/error to Cracks_Tracker table using actual schema"""
         try:
-            self.create_record(
+            actual_fields = self.get_field_names("Cracks_Tracker", use_cache=True)
+            
+            fields = {}
+            
+            # Find service field
+            service_field = self._get_actual_field_name(
                 "Cracks_Tracker",
-                {
-                    "Service": service,
-                    "Error": error[:10000],
-                    "Timestamp": datetime.now(timezone.utc).isoformat(),
-                }
+                ["Service", "Engine", "Source", "Component", "Name"]
             )
+            if service_field:
+                fields[service_field] = service
+            
+            # Find error field
+            error_field = self._get_actual_field_name(
+                "Cracks_Tracker",
+                ["Error", "Message", "Description", "Details", "Info"]
+            )
+            if error_field:
+                fields[error_field] = error[:10000]
+            
+            # Find timestamp field
+            timestamp_field = self._get_actual_field_name(
+                "Cracks_Tracker",
+                ["Timestamp", "Created", "Date", "Time"]
+            )
+            if timestamp_field:
+                fields[timestamp_field] = datetime.now(timezone.utc).isoformat()
+            
+            if fields:
+                self.create_record("Cracks_Tracker", fields)
+            else:
+                print(f"[AIRTABLE] Cracks_Tracker fields not found in schema: {actual_fields}")
+        
         except Exception as e:
             print(f"[AIRTABLE] Failed to log crack: {e}")

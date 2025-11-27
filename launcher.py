@@ -22,8 +22,7 @@ def run_worker(name: str, module):
         module.main()
     except Exception as e:
         print(f"[LAUNCHER] ERROR in {name}: {e}")
-        # Don't crash the whole process if one worker fails
-        time.sleep(60)  # Wait before the thread dies
+        time.sleep(60)
 
 
 def main():

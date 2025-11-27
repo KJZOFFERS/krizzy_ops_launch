@@ -1,14 +1,19 @@
-# src/airtable_client.py
+# src/common/airtable_client.py
 
 import os
 import time
 from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
 
 import requests
 
 
 class AirtableError(Exception):
     """Custom error for Airtable API failures."""
+
+
+class AirtableSchemaError(AirtableError):
+    """Raised when schema validation fails."""
 
 
 class AirtableClient:
@@ -271,27 +276,42 @@ class AirtableClient:
         )
         return records[0] if records else None
 
-    def upsert_one(
+    def safe_upsert(
         self,
         table_name: str,
-        unique_field: str,
-        unique_value: Any,
         fields: Dict[str, Any],
+        match_fields: List[str],
+        typecast: bool = False,
     ) -> Dict[str, Any]:
         """
-        Simple "upsert" by unique field.
-        If a record with unique_field == unique_value exists, updates it.
-        Otherwise, creates a new one.
+        Upsert by checking existence based on match_fields.
+        Returns: {"action": "created" | "updated" | "skipped", "record": {...}}
         """
-        # Escape double quotes in value for filter formula
-        value_str = str(unique_value).replace('"', '\\"')
-        formula = f"{{{unique_field}}} = \"{value_str}\""
+        # Build filter formula
+        conditions = []
+        for field_name in match_fields:
+            value = fields.get(field_name)
+            if value is None:
+                continue
+            # Escape quotes
+            value_str = str(value).replace('"', '\\"')
+            conditions.append(f"{{{field_name}}} = \"{value_str}\"")
 
+        if not conditions:
+            # No match fields provided, just create
+            rec = self.create_record(table_name, fields)
+            return {"action": "created", "record": rec}
+
+        formula = "AND(" + ", ".join(conditions) + ")"
         existing = self.find_first_by_formula(table_name, formula)
+
         if existing:
-            record_id = existing["id"]
-            return self.update_record(table_name, record_id, fields)
-        return self.create_record(table_name, {**fields, unique_field: unique_value})
+            rec_id = existing["id"]
+            rec = self.update_record(table_name, rec_id, fields)
+            return {"action": "updated", "record": rec}
+        else:
+            rec = self.create_record(table_name, fields)
+            return {"action": "created", "record": rec}
 
     def ping(self) -> bool:
         """
@@ -302,3 +322,35 @@ class AirtableClient:
             return True
         except Exception:
             return False
+
+    # ------------------------------------------------------------------ #
+    # KRIZZY OPS specific helpers
+    # ------------------------------------------------------------------ #
+
+    def log_kpi(self, event_type: str, data: Dict[str, Any]) -> None:
+        """Log KPI event to KPI_Log table"""
+        try:
+            self.create_record(
+                "KPI_Log",
+                {
+                    "Event Type": event_type,
+                    "Data": str(data)[:10000],
+                    "Timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        except Exception as e:
+            print(f"[AIRTABLE] Failed to log KPI: {e}")
+
+    def log_crack(self, service: str, error: str) -> None:
+        """Log crack/error to Cracks_Tracker table"""
+        try:
+            self.create_record(
+                "Cracks_Tracker",
+                {
+                    "Service": service,
+                    "Error": error[:10000],
+                    "Timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        except Exception as e:
+            print(f"[AIRTABLE] Failed to log crack: {e}")

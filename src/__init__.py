@@ -1,13 +1,14 @@
-# src/__init__.py
+# src/ops/__init__.py
 
-from .common.airtable_client import AirtableClient, AirtableSchemaError, AirtableError
-from . import ops_health_service, govcon_subtrap_engine, rei_dispo_engine
+from .ops_notify import send_ops, send_health, send_crack
+from .engine_guard import guard_engine, engine_enabled
+from .preflight import run_preflight
 
 __all__ = [
-    "AirtableClient",
-    "AirtableSchemaError",
-    "AirtableError",
-    "ops_health_service",
-    "govcon_subtrap_engine",
-    "rei_dispo_engine",
+    "send_ops",
+    "send_health",
+    "send_crack",
+    "guard_engine",
+    "engine_enabled",
+    "run_preflight",
 ]

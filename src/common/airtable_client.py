@@ -1,427 +1,192 @@
 # src/common/airtable_client.py
 
+import json
 import os
+import re
 import time
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
-import requests
-
-
-class AirtableError(Exception):
-    """Custom error for Airtable API failures."""
+import urllib.request
+import urllib.error
 
 
-class AirtableSchemaError(AirtableError):
-    """Raised when schema validation fails."""
+AIRTABLE_API_BASE = "https://api.airtable.com/v0"
+AIRTABLE_META_BASE = "https://api.airtable.com/v0/meta/bases"
+
+
+def _http_request(url: str, api_key: str, method: str = "GET", body: Optional[dict] = None) -> dict:
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    data: Optional[bytes] = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        # Raise with more context so logs are clear
+        detail = e.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Airtable HTTPError {e.code} for {url}: {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Airtable URLError for {url}: {e}") from e
+
+
+def _normalize_field_name(name: str) -> str:
+    """
+    Normalize a field key for matching:
+    - lowercased
+    - non-alphanumeric -> underscore
+    - collapse multiple underscores
+    """
+    name = name.strip().lower()
+    name = re.sub(r"[^a-z0-9]+", "_", name)
+    name = re.sub(r"_+", "_", name)
+    return name.strip("_")
 
 
 class AirtableTable:
     """
-    Shim to provide pyairtable-like interface for a single table.
-    Used by get_table() to maintain compatibility with existing code.
+    Table adapter with schema-aware safe writes.
     """
-    
-    def __init__(self, client: 'AirtableClient', table_name: str):
-        self.client = client
+
+    def __init__(self, base_id: str, api_key: str, table_name: str, schema_fields: Dict[str, str]):
+        """
+        schema_fields: normalized_name -> actual_field_name
+        """
+        self.base_id = base_id
+        self.api_key = api_key
         self.table_name = table_name
-    
-    def all(self, max_records: Optional[int] = None, **kwargs) -> List[Dict[str, Any]]:
-        """Fetch all records (pyairtable-compatible)"""
-        return self.client.list_records(
-            self.table_name,
-            max_records=max_records or 100,
-            **kwargs
-        )
-    
-    def first(self, **kwargs) -> Optional[Dict[str, Any]]:
-        """Fetch first record matching criteria"""
-        filter_formula = kwargs.pop("filter_formula", kwargs.pop("formula", None))
-        if filter_formula:
-            return self.client.find_first_by_formula(
-                self.table_name,
-                filter_formula,
-                **kwargs
-            )
-        records = self.all(max_records=1, **kwargs)
-        return records[0] if records else None
-    
-    def create(self, fields: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a record"""
-        return self.client.create_record(self.table_name, fields)
-    
-    def update(self, record_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-        """Update a record"""
-        return self.client.update_record(self.table_name, record_id, fields)
-    
-    def delete(self, record_id: str) -> Dict[str, Any]:
-        """Delete a record"""
-        return self.client.delete_record(self.table_name, record_id)
+        self.schema_fields = schema_fields
+
+    @property
+    def _table_url(self) -> str:
+        return f"{AIRTABLE_API_BASE}/{self.base_id}/{self.table_name}"
+
+    def _filter_known_fields(self, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Only send fields that exist in Airtable's current schema.
+        This prevents 'Unknown field name "Service"' / 'Event Type' errors.
+        """
+        safe: Dict[str, Any] = {}
+        for key, value in fields.items():
+            norm = _normalize_field_name(key)
+            actual = self.schema_fields.get(norm)
+            if actual:
+                safe[actual] = value
+            # else: silently drop unknown fields
+        return safe
+
+    def create_record(self, fields: Dict[str, Any]) -> Optional[str]:
+        safe_fields = self._filter_known_fields(fields)
+        if not safe_fields:
+            # Nothing valid to send; don't hit Airtable
+            return None
+
+        body = {"fields": safe_fields}
+        resp = _http_request(self._table_url, self.api_key, method="POST", body=body)
+        return resp.get("id")
+
+    def update_record(self, record_id: str, fields: Dict[str, Any]) -> None:
+        safe_fields = self._filter_known_fields(fields)
+        if not safe_fields:
+            return
+
+        url = f"{self._table_url}/{record_id}"
+        body = {"fields": safe_fields}
+        _http_request(url, self.api_key, method="PATCH", body=body)
 
 
 class AirtableClient:
     """
-    Thin wrapper around Airtable REST + Meta API.
-
-    Uses:
-      - AIRTABLE_API_KEY
-      - AIRTABLE_BASE_ID
-
-    Endpoints:
-      - Meta (schema): https://api.airtable.com/v0/meta/bases/{base_id}/tables
-      - Records:       https://api.airtable.com/v0/{base_id}/{table_name}
+    Meta-schema-aware Airtable client.
+    - Loads base schema once
+    - get_table(name) returns a schema-safe AirtableTable
     """
 
-    META_URL_TEMPLATE = "https://api.airtable.com/v0/meta/bases/{base_id}/tables"
-    RECORDS_URL_TEMPLATE = "https://api.airtable.com/v0/{base_id}/{table_name}"
+    def __init__(self, base_id: str, api_key: str):
+        self.base_id = base_id
+        self.api_key = api_key
+        self._schema_loaded_at: float = 0.0
+        self._tables: Dict[str, Dict[str, str]] = {}  # table_name -> normalized_field -> actual_name
 
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        base_id: Optional[str] = None,
-        timeout: int = 30,
-        max_retries: int = 3,
-    ) -> None:
-        self.api_key = api_key or os.getenv("AIRTABLE_API_KEY", "").strip()
-        self.base_id = base_id or os.getenv("AIRTABLE_BASE_ID", "").strip()
-        self.timeout = timeout
-        self.max_retries = max_retries
+    @classmethod
+    def from_env(cls) -> "AirtableClient":
+        base_id = os.environ["AIRTABLE_BASE_ID"]
+        api_key = os.environ["AIRTABLE_API_KEY"]
+        return cls(base_id=base_id, api_key=api_key)
 
-        if not self.api_key:
-            raise AirtableError("AIRTABLE_API_KEY is not set")
+    def _load_schema(self, force: bool = False) -> None:
+        now = time.time()
+        # Refresh at most every 5 minutes unless forced
+        if not force and self._schema_loaded_at and (now - self._schema_loaded_at) < 300:
+            return
 
-        if not self.base_id:
-            raise AirtableError("AIRTABLE_BASE_ID is not set")
+        url = f"{AIRTABLE_META_BASE}/{self.base_id}/tables"
+        resp = _http_request(url, self.api_key, method="GET")
 
-        if self.base_id.startswith("http"):
-            raise AirtableError(
-                "AIRTABLE_BASE_ID must be a base id (e.g. 'appIe21nS9Z9ahV7V'), "
-                "not an Airtable URL."
-            )
+        tables: Dict[str, Dict[str, str]] = {}
+        for table in resp.get("tables", []):
+            table_name = table.get("name")
+            field_map: Dict[str, str] = {}
+            for field in table.get("fields", []):
+                actual_name = field.get("name")
+                norm_name = _normalize_field_name(actual_name)
+                field_map[norm_name] = actual_name
+            tables[table_name] = field_map
 
-        self._tables_cache: Optional[List[Dict[str, Any]]] = None
-        self._field_cache: Dict[str, List[str]] = {}
-
-    @property
-    def _auth_headers(self) -> Dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-
-    def _request(
-        self,
-        method: str,
-        url: str,
-        *,
-        params: Optional[Dict[str, Any]] = None,
-        json: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        last_exc: Optional[Exception] = None
-
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                resp = requests.request(
-                    method=method.upper(),
-                    url=url,
-                    headers=self._auth_headers,
-                    params=params,
-                    json=json,
-                    timeout=self.timeout,
-                )
-                if resp.status_code == 429 and attempt < self.max_retries:
-                    retry_after = int(resp.headers.get("Retry-After", "1"))
-                    time.sleep(retry_after or attempt)
-                    continue
-
-                if not resp.ok:
-                    raise AirtableError(
-                        f"Airtable {method} {url} failed "
-                        f"({resp.status_code}): {resp.text}"
-                    )
-
-                data = resp.json()
-                if not isinstance(data, dict):
-                    raise AirtableError(
-                        f"Unexpected Airtable response format for {method} {url}"
-                    )
-                return data
-
-            except Exception as exc:
-                last_exc = exc
-                if attempt == self.max_retries:
-                    raise
-                time.sleep(attempt)
-
-        if last_exc:
-            raise last_exc
-        raise AirtableError("Unknown Airtable request failure")
-
-    def refresh_tables_cache(self) -> List[Dict[str, Any]]:
-        url = self.META_URL_TEMPLATE.format(base_id=self.base_id)
-        data = self._request("GET", url)
-        tables = data.get("tables", [])
-        if not isinstance(tables, list):
-            raise AirtableError("Invalid Meta API payload: 'tables' is not a list")
-        self._tables_cache = tables
-        return tables
-
-    def get_tables(self, use_cache: bool = True) -> List[Dict[str, Any]]:
-        if use_cache and self._tables_cache is not None:
-            return self._tables_cache
-        return self.refresh_tables_cache()
-
-    def get_table_schema(self, table_name: str) -> Dict[str, Any]:
-        tables = self.get_tables()
-        for tbl in tables:
-            if tbl.get("name") == table_name:
-                return tbl
-        raise AirtableSchemaError(f"Table '{table_name}' not found in Meta API")
-
-    def get_field_names(self, table_name: str, use_cache: bool = True) -> List[str]:
-        if use_cache and table_name in self._field_cache:
-            return self._field_cache[table_name]
-        
-        schema = self.get_table_schema(table_name)
-        fields = schema.get("fields", [])
-        field_names = [f.get("name") for f in fields if isinstance(f, dict)]
-        self._field_cache[table_name] = field_names
-        return field_names
+        self._tables = tables
+        self._schema_loaded_at = now
 
     def get_table(self, table_name: str) -> AirtableTable:
         """
-        Get a table shim with pyairtable-like interface.
-        Enables: client.get_table("TableName").all(max_records=50)
+        Main entry used by engines:
+            cracks = airtable.get_table("Cracks_Tracker")
+            cracks.create_record({...})
         """
-        return AirtableTable(self, table_name)
+        self._load_schema()
+        table_fields = self._tables.get(table_name)
+        if table_fields is None:
+            # Force reload once in case of new table, then re-check
+            self._load_schema(force=True)
+            table_fields = self._tables.get(table_name)
+            if table_fields is None:
+                # No table; use empty schema so writes become no-ops
+                table_fields = {}
 
-    def list_records(
-        self,
-        table_name: str,
-        *,
-        view: Optional[str] = None,
-        filter_formula: Optional[str] = None,
-        fields: Optional[List[str]] = None,
-        max_records: Optional[int] = None,
-        page_size: int = 100,
-        sort: Optional[List[Dict[str, str]]] = None,
-    ) -> List[Dict[str, Any]]:
-        url = self.RECORDS_URL_TEMPLATE.format(
-            base_id=self.base_id, table_name=table_name
+        return AirtableTable(
+            base_id=self.base_id,
+            api_key=self.api_key,
+            table_name=table_name,
+            schema_fields=table_fields,
         )
 
-        params: Dict[str, Any] = {"pageSize": page_size}
+    # Optional helpers if you want one-liners elsewhere in the code:
 
-        if view:
-            params["view"] = view
-        if filter_formula:
-            params["filterByFormula"] = filter_formula
-        if fields:
-            for idx, f_name in enumerate(fields):
-                params[f"fields[{idx}]"] = f_name
-        if sort:
-            for idx, s in enumerate(sort):
-                params[f"sort[{idx}][field]"] = s.get("field", "")
-                params[f"sort[{idx}][direction]"] = s.get("direction", "asc")
-
-        all_records: List[Dict[str, Any]] = []
-        offset: Optional[str] = None
-
-        while True:
-            if offset:
-                params["offset"] = offset
-
-            data = self._request("GET", url, params=params)
-            records = data.get("records", [])
-            if not isinstance(records, list):
-                raise AirtableError("Invalid records payload (no 'records' list)")
-
-            all_records.extend(records)
-
-            if max_records and len(all_records) >= max_records:
-                return all_records[:max_records]
-
-            offset = data.get("offset")
-            if not offset:
-                break
-
-        return all_records
-
-    def create_record(self, table_name: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-        url = self.RECORDS_URL_TEMPLATE.format(
-            base_id=self.base_id, table_name=table_name
-        )
-        payload = {"fields": fields}
-        return self._request("POST", url, json=payload)
-
-    def update_record(
-        self,
-        table_name: str,
-        record_id: str,
-        fields: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        url = self.RECORDS_URL_TEMPLATE.format(
-            base_id=self.base_id, table_name=table_name
-        )
-        payload = {
-            "records": [
-                {
-                    "id": record_id,
-                    "fields": fields,
-                }
-            ]
-        }
-        return self._request("PATCH", url, json=payload)
-
-    def delete_record(self, table_name: str, record_id: str) -> Dict[str, Any]:
-        url = self.RECORDS_URL_TEMPLATE.format(
-            base_id=self.base_id, table_name=table_name
-        )
-        params = {"records[]": record_id}
-        return self._request("DELETE", url, params=params)
-
-    def find_first_by_formula(
-        self,
-        table_name: str,
-        filter_formula: str,
-        *,
-        view: Optional[str] = None,
-        fields: Optional[List[str]] = None,
-    ) -> Optional[Dict[str, Any]]:
-        records = self.list_records(
-            table_name,
-            filter_formula=filter_formula,
-            view=view,
-            fields=fields,
-            max_records=1,
-        )
-        return records[0] if records else None
-
-    def safe_upsert(
-        self,
-        table_name: str,
-        fields: Dict[str, Any],
-        match_fields: List[str],
-        typecast: bool = False,
-    ) -> Dict[str, Any]:
+    def log_crack(self, table_name: str, fields: Dict[str, Any]) -> None:
         """
-        Upsert by checking existence based on match_fields.
-        Returns: {"action": "created" | "updated", "record": {...}}
+        Example:
+            client.log_crack("Cracks_Tracker", {
+                "Engine": "REI",
+                "Message": "Airtable write error",
+                "Context": json.dumps(context),
+            })
         """
-        conditions = []
-        for field_name in match_fields:
-            value = fields.get(field_name)
-            if value is None:
-                continue
-            value_str = str(value).replace('"', '\\"')
-            conditions.append(f"{{{field_name}}} = \"{value_str}\"")
+        table = self.get_table(table_name)
+        table.create_record(fields)
 
-        if not conditions:
-            rec = self.create_record(table_name, fields)
-            return {"action": "created", "record": rec}
-
-        formula = "AND(" + ", ".join(conditions) + ")"
-        existing = self.find_first_by_formula(table_name, formula)
-
-        if existing:
-            rec_id = existing["id"]
-            rec = self.update_record(table_name, rec_id, fields)
-            return {"action": "updated", "record": rec}
-        else:
-            rec = self.create_record(table_name, fields)
-            return {"action": "created", "record": rec}
-
-    def ping(self) -> bool:
-        """Lightweight health-check: confirms that Meta API and auth work."""
-        try:
-            self.get_tables(use_cache=False)
-            return True
-        except Exception:
-            return False
-
-    def _get_actual_field_name(self, table_name: str, preferred_names: List[str]) -> Optional[str]:
-        """Find first matching field name from preferences"""
-        actual_fields = self.get_field_names(table_name, use_cache=True)
-        for pref in preferred_names:
-            if pref in actual_fields:
-                return pref
-        return None
-
-    def log_kpi(self, event_type: str, data: Dict[str, Any]) -> None:
-        """Log KPI event to KPI_Log table using actual schema"""
-        try:
-            actual_fields = self.get_field_names("KPI_Log", use_cache=True)
-            
-            # Build fields dict using actual field names
-            fields = {}
-            
-            # Find event type field
-            event_field = self._get_actual_field_name(
-                "KPI_Log",
-                ["Event Type", "EventType", "Event", "Type", "Name"]
-            )
-            if event_field:
-                fields[event_field] = event_type
-            
-            # Find data field
-            data_field = self._get_actual_field_name(
-                "KPI_Log",
-                ["Data", "Payload", "Details", "Info", "JSON"]
-            )
-            if data_field:
-                fields[data_field] = str(data)[:10000]
-            
-            # Find timestamp field
-            timestamp_field = self._get_actual_field_name(
-                "KPI_Log",
-                ["Timestamp", "Created", "Date", "Time"]
-            )
-            if timestamp_field:
-                fields[timestamp_field] = datetime.now(timezone.utc).isoformat()
-            
-            if fields:
-                self.create_record("KPI_Log", fields)
-            else:
-                print(f"[AIRTABLE] KPI_Log fields not found in schema: {actual_fields}")
-        
-        except Exception as e:
-            print(f"[AIRTABLE] Failed to log KPI: {e}")
-
-    def log_crack(self, service: str, error: str) -> None:
-        """Log crack/error to Cracks_Tracker table using actual schema"""
-        try:
-            actual_fields = self.get_field_names("Cracks_Tracker", use_cache=True)
-            
-            fields = {}
-            
-            # Find service field
-            service_field = self._get_actual_field_name(
-                "Cracks_Tracker",
-                ["Service", "Engine", "Source", "Component", "Name"]
-            )
-            if service_field:
-                fields[service_field] = service
-            
-            # Find error field
-            error_field = self._get_actual_field_name(
-                "Cracks_Tracker",
-                ["Error", "Message", "Description", "Details", "Info"]
-            )
-            if error_field:
-                fields[error_field] = error[:10000]
-            
-            # Find timestamp field
-            timestamp_field = self._get_actual_field_name(
-                "Cracks_Tracker",
-                ["Timestamp", "Created", "Date", "Time"]
-            )
-            if timestamp_field:
-                fields[timestamp_field] = datetime.now(timezone.utc).isoformat()
-            
-            if fields:
-                self.create_record("Cracks_Tracker", fields)
-            else:
-                print(f"[AIRTABLE] Cracks_Tracker fields not found in schema: {actual_fields}")
-        
-        except Exception as e:
-            print(f"[AIRTABLE] Failed to log crack: {e}")
+    def log_kpi(self, table_name: str, fields: Dict[str, Any]) -> None:
+        """
+        Example:
+            client.log_kpi("KPI_Log", {
+                "Engine": "REI",
+                "Metric": "New Leads",
+                "Value": 42,
+            })
+        """
+        table = self.get_table(table_name)
+        table.create_record(fields)

@@ -1,21 +1,31 @@
 # launcher.py
-  from src.ops import run_preflight
-  
-  # ops_health_service.py
-  from src.ops import send_ops, send_health, send_crack, guard_engine
-  
-  # Possibly in src/__init__.py
-  from .ops_notify import ...
-```
-- **ROOT_CAUSE**: Import paths don't match actual module structure. If `ops_notify` is a separate module from `ops`, imports need to reflect that. Mixing `src.ops` and `.ops_notify` suggests confusion about module organization.
-- **IMPACT**: **BLOCKER**. ImportError on module load.
-- **PRIMARY FIX**: Standardize on one import pattern and ensure module structure matches. If using package structure (`src/ops/`), all imports should use either `from src.ops import X` or `from .ops import X` (for relative imports within `src/`).
-- **RISK LEVEL**: **BLOCKER**
 
-### CRACK_004_REVISED
-- **CRACK_ID**: AIRTABLE_EXCEPTION_CLASSES_MISSING
-- **TYPE**: IMPORT
-- **LOCATION**: `src/__init__.py` and `main.py`
-- **SYMPTOMS**:
-```
-  ImportError: cannot import name 'AirtableSchemaError' from 'src.common.airtable_client'
+"""
+KRIZZY OPS UNIFIED LAUNCHER
+Runs web server + all 3 worker engines in a single Railway process
+@@ -8,6 +10,9 @@
+import time
+from datetime import datetime
+
+# Import preflight
+from src.ops import run_preflight
+
+# Import the web app
+from main import app
+
+@@ -29,6 +34,15 @@ def main():
+    """Start web server + all workers"""
+    print(f"[LAUNCHER] KRIZZY OPS starting at {datetime.now().isoformat()}")
+    print(f"[LAUNCHER] Python version: {sys.version}")
+    
+    # Run preflight checks
+    print("[LAUNCHER] Running preflight checks...")
+    preflight_ok = run_preflight()
+    
+    if not preflight_ok:
+        print("[LAUNCHER] ⚠️  PREFLIGHT FAILED - some systems degraded but continuing...")
+        # Don't exit, just warn - let engines handle their own errors
+    
+    print(f"[LAUNCHER] Starting 3 worker threads + web server...")
+
+    # Start worker threads

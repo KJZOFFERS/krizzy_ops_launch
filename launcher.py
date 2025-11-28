@@ -1,77 +1,21 @@
 # launcher.py
+  from src.ops import run_preflight
+  
+  # ops_health_service.py
+  from src.ops import send_ops, send_health, send_crack, guard_engine
+  
+  # Possibly in src/__init__.py
+  from .ops_notify import ...
+```
+- **ROOT_CAUSE**: Import paths don't match actual module structure. If `ops_notify` is a separate module from `ops`, imports need to reflect that. Mixing `src.ops` and `.ops_notify` suggests confusion about module organization.
+- **IMPACT**: **BLOCKER**. ImportError on module load.
+- **PRIMARY FIX**: Standardize on one import pattern and ensure module structure matches. If using package structure (`src/ops/`), all imports should use either `from src.ops import X` or `from .ops import X` (for relative imports within `src/`).
+- **RISK LEVEL**: **BLOCKER**
 
-"""
-KRIZZY OPS UNIFIED LAUNCHER
-Runs web server + all 3 worker engines in a single Railway process
-"""
-import os
-import sys
-import threading
-import time
-from datetime import datetime
-
-# Import preflight
-from src.ops import run_preflight
-
-# Import the web app
-from main import app
-
-# Import worker engines
-from src import ops_health_service, govcon_subtrap_engine, rei_dispo_engine
-
-
-def run_worker(name: str, module):
-    """Run a worker module's main() in a thread"""
-    print(f"[LAUNCHER] Starting {name} worker thread...")
-    try:
-        module.main()
-    except Exception as e:
-        print(f"[LAUNCHER] ERROR in {name}: {e}")
-        time.sleep(60)
-
-
-def main():
-    """Start web server + all workers"""
-    print(f"[LAUNCHER] KRIZZY OPS starting at {datetime.now().isoformat()}")
-    print(f"[LAUNCHER] Python version: {sys.version}")
-    
-    # Run preflight checks
-    print("[LAUNCHER] Running preflight checks...")
-    preflight_ok = run_preflight()
-    
-    if not preflight_ok:
-        print("[LAUNCHER] ⚠️  PREFLIGHT FAILED - some systems degraded but continuing...")
-        # Don't exit, just warn - let engines handle their own errors
-    
-    print(f"[LAUNCHER] Starting 3 worker threads + web server...")
-    
-    # Start worker threads
-    workers = [
-        ("OPS_HEALTH", ops_health_service),
-        ("GOVCON", govcon_subtrap_engine),
-        ("REI_DISPO", rei_dispo_engine),
-    ]
-    
-    threads = []
-    for name, module in workers:
-        t = threading.Thread(target=run_worker, args=(name, module), daemon=True)
-        t.start()
-        threads.append((name, t))
-        print(f"[LAUNCHER] ✅ {name} thread started")
-    
-    # Give threads a moment to initialize
-    time.sleep(2)
-    
-    # Start web server (blocking call)
-    print(f"[LAUNCHER] Starting web server on port {os.getenv('PORT', 8080)}...")
-    import uvicorn
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 8080)),
-        log_level="info"
-    )
-
-
-if __name__ == "__main__":
-    main()
+### CRACK_004_REVISED
+- **CRACK_ID**: AIRTABLE_EXCEPTION_CLASSES_MISSING
+- **TYPE**: IMPORT
+- **LOCATION**: `src/__init__.py` and `main.py`
+- **SYMPTOMS**:
+```
+  ImportError: cannot import name 'AirtableSchemaError' from 'src.common.airtable_client'

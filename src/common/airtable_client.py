@@ -1,6 +1,7 @@
 import os
 import httpx
 
+
 class AirtableClient:
     def __init__(self):
         self.token = os.getenv("AIRTABLE_API_KEY")
@@ -18,30 +19,23 @@ class AirtableClient:
         url = f"https://api.airtable.com/v0/{self.base_id}/{table}"
         async with httpx.AsyncClient() as client:
             r = await client.get(url, headers=self.headers)
+            r.raise_for_status()
             return r.json()
 
     async def create(self, table: str, fields: dict):
         url = f"https://api.airtable.com/v0/{self.base_id}/{table}"
         async with httpx.AsyncClient() as client:
             r = await client.post(url, json={"fields": fields}, headers=self.headers)
+            r.raise_for_status()
             return r.json()
 
 
 def get_airtable():
+    """
+    Lazy-loaded Airtable client. Returns None if misconfigured.
+    Keeps container stable even with missing env vars.
+    """
     try:
         return AirtableClient()
     except Exception:
         return None
-
-            r.raise_for_status()
-            return r.json()
-
-    async def create(self, table, fields):
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(
-                f"{self.base_url}/{table}",
-                headers=self.headers,
-                json={"fields": fields}
-            )
-            r.raise_for_status()
-            return r.json()

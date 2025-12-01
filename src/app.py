@@ -1,21 +1,36 @@
 # src/app.py
-# Minimal hardened FastAPI app for KRIZZY OPS
+# KRIZZY OPS - FastAPI + 24/7 Scheduler
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup and shutdown events."""
+    # Startup: launch scheduler
+    from src.scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
+    
+    yield
+    
+    # Shutdown: stop scheduler
+    stop_scheduler()
+
+
 app = FastAPI(
     title="KRIZZY OPS",
     version="1.0.0",
-    description="REI Dispo + GovCon Sub-Trap Automation Platform"
+    description="REI Dispo + GovCon Sub-Trap Automation Platform",
+    lifespan=lifespan
 )
 
 
 @app.get("/")
 def root() -> Dict[str, Any]:
-    return {"krizzy_ops": "online"}
+    return {"krizzy_ops": "online", "scheduler": "active"}
 
 
 @app.get("/health")
@@ -68,6 +83,18 @@ async def health_deep() -> Dict[str, Any]:
     except Exception as e:
         results["integrations"]["github"] = f"error: {e}"
 
+    # Scheduler
+    try:
+        from src.scheduler import scheduler, SCHEDULER_ENABLED, REI_INTERVAL, GOVCON_INTERVAL
+        results["integrations"]["scheduler"] = {
+            "enabled": SCHEDULER_ENABLED,
+            "running": scheduler.running if SCHEDULER_ENABLED else False,
+            "rei_interval_minutes": REI_INTERVAL,
+            "govcon_interval_minutes": GOVCON_INTERVAL
+        }
+    except Exception as e:
+        results["integrations"]["scheduler"] = f"error: {e}"
+
     return results
 
 
@@ -75,11 +102,9 @@ async def health_deep() -> Dict[str, Any]:
 async def rei() -> Any:
     """
     REI Dispo Engine entrypoint.
-    All heavy imports and Airtable calls happen inside the engine.
     """
     from src.engines.rei_engine import run_rei_engine
     result = await run_rei_engine()
-    # Ensure consistent JSON response
     if isinstance(result, dict):
         return JSONResponse(result)
     return result
@@ -95,3 +120,31 @@ async def govcon() -> Any:
     if isinstance(result, dict):
         return JSONResponse(result)
     return result
+```
+
+---
+
+## ENV VARS TO ADD (Railway)
+```
+SCHEDULER_ENABLED=true
+REI_INTERVAL_MINUTES=15
+GOVCON_INTERVAL_MINUTES=30
+TWILIO_FROM_NUMBER=+1XXXXXXXXXX
+```
+
+---
+
+## OPTION B: External Cron (Alternative)
+
+If you prefer external scheduling, use cron-job.org (free) or n8n:
+
+| Job | URL | Interval |
+|-----|-----|----------|
+| REI | `GET https://krizzyopslaunch-production.up.railway.app/rei` | Every 15 min |
+| GovCon | `GET https://krizzyopslaunch-production.up.railway.app/govcon` | Every 30 min |
+
+---
+
+## VERIFY (After Deploy)
+```
+GET /health/deep

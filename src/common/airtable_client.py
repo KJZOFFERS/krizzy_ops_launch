@@ -1,43 +1,38 @@
-# src/common/airtable_client.py
 import os
 import httpx
 
-AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
-BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-
-
 class AirtableClient:
     def __init__(self):
-        if not AIRTABLE_API_KEY or not BASE_ID:
+        self.token = os.getenv("AIRTABLE_API_KEY")
+        self.base_id = os.getenv("AIRTABLE_BASE_ID")
+
+        if not self.token or not self.base_id:
             raise RuntimeError("Missing Airtable env vars.")
 
-        self.base_url = f"https://api.airtable.com/v0/{BASE_ID}"
         self.headers = {
-            "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+            "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json"
         }
 
-    async def fetch(self, table, view=None):
-        params = {}
-        if view:
-            params["view"] = view
+    async def get(self, table: str):
+        url = f"https://api.airtable.com/v0/{self.base_id}/{table}"
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers=self.headers)
+            return r.json()
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.get(
-                f"{self.base_url}/{table}",
-                headers=self.headers,
-                params=params
-            )
-            r.raise_for_status()
-            return r.json().get("records", [])
+    async def create(self, table: str, fields: dict):
+        url = f"https://api.airtable.com/v0/{self.base_id}/{table}"
+        async with httpx.AsyncClient() as client:
+            r = await client.post(url, json={"fields": fields}, headers=self.headers)
+            return r.json()
 
-    async def update(self, table, record_id, fields):
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.patch(
-                f"{self.base_url}/{table}/{record_id}",
-                headers=self.headers,
-                json={"fields": fields}
-            )
+
+def get_airtable():
+    try:
+        return AirtableClient()
+    except Exception:
+        return None
+
             r.raise_for_status()
             return r.json()
 

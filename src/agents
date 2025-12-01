@@ -1,0 +1,15 @@
+from src.engines.rei_engine import run_rei_engine
+from src.clients.airtable import AirtableClient
+from src.clients.discord_client import send_discord
+from src.config.env import AIRTABLE_BASE_ID, AIRTABLE_API_KEY
+
+def rei_agent():
+    airtable = AirtableClient(AIRTABLE_API_KEY, AIRTABLE_BASE_ID)
+    results = run_rei_engine(airtable)
+
+    send_discord(f"[REI AGENT] Completed REI engine run. Found {len(results)} results.")
+
+    return {
+        "status": "ok",
+        "results": results
+    }

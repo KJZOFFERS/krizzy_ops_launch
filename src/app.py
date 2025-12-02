@@ -1,52 +1,55 @@
 import os
+from typing import Dict, Any
+
 from fastapi import FastAPI
 
-app = FastAPI()
-
-# ================== TWILIO CONFIG (OPTIONAL) ==================
-
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
-TWILIO_MESSAGING_SERVICE_SID = os.getenv("TWILIO_MESSAGING_SERVICE_SID", "")
-TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")  # e.g. "+1617XXXXXXX"
-
-TWILIO_ENABLED = bool(
-    TWILIO_ACCOUNT_SID
-    and TWILIO_AUTH_TOKEN
-    and (TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_NUMBER)
-)
-
-try:
-    from twilio.rest import Client  # type: ignore
-except ImportError:
-    Client = None  # type: ignore[assignment]
-    TWILIO_ENABLED = False
-
-if TWILIO_ENABLED and Client is not None:
-    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-else:
-    twilio_client = None
+app = FastAPI(title="KRIZZY OPS Core Service")
 
 
-def send_sms(to: str, body: str) -> None:
+def check_airtable_ready() -> bool:
+    """True if Airtable creds are present."""
+    base_id = os.getenv("AIRTABLE_BASE_ID")
+    api_key = os.getenv("AIRTABLE_API_KEY")
+    return bool(base_id and api_key)
+
+
+def check_twilio_ready() -> bool:
+    """True if Twilio creds are present (but does NOT require Twilio to be used)."""
+    sid = os.getenv("TWILIO_ACCOUNT_SID")
+    token = os.getenv("TWILIO_AUTH_TOKEN")
+    messaging_sid = os.getenv("TWILIO_MESSAGING_SERVICE_SID")
+    return bool(sid and token and messaging_sid)
+
+
+@app.get("/")
+async def root() -> Dict[str, Any]:
     """
-    Safe Twilio wrapper.
-    - If Twilio is not configured or library missing: logs and returns.
-    - If configured: sends real SMS.
+    Root endpoint: used for manual checks and quick verification.
+
+    This does not send SMS, does not touch Airtable, and will stay green
+    even if those integrations are not configured yet.
     """
-    if not TWILIO_ENABLED or twilio_client is None:
-        print(f"[TWILIO_DISABLED] SMS to={to} body={body}")
-        return
+    return {
+        "status": "ok",
+        "engine": "KRIZZY_OPS",
+        "services": {
+            "rei_dispo": True,
+            "govcon_subtrap": True,
+            "watchdog": True,
+        },
+        "integrations": {
+            "airtable_ready": check_airtable_ready(),
+            "twilio_ready": check_twilio_ready(),
+        },
+    }
 
-    kwargs = {"to": to, "body": body}
-    if TWILIO_MESSAGING_SERVICE_SID:
-        kwargs["messaging_service_sid"] = TWILIO_MESSAGING_SERVICE_SID
-    elif TWILIO_FROM_NUMBER:
-        kwargs["from_"] = TWILIO_FROM_NUMBER
-    else:
-        print("[TWILIO_DISABLED] No FROM configured.")
-        return
 
-    twilio_client.messages.create(**kwargs)
+@app.get("/health")
+async def health() -> Dict[str, str]:
+    """
+    Health endpoint: this is what Railway should hit for health checks.
 
-# ================== END TWILIO CONFIG ==================
+    It must always return 200 if the process is alive and the app booted.
+    It does NOT depend on Airtable or Twilio.
+    """
+    return {"status": "ok"}

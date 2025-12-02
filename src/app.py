@@ -1,150 +1,52 @@
-# src/app.py
-# KRIZZY OPS - FastAPI + 24/7 Scheduler
-
-from contextlib import asynccontextmanager
+import os
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from typing import Dict, Any
 
+app = FastAPI()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Startup and shutdown events."""
-    # Startup: launch scheduler
-    from src.scheduler import start_scheduler, stop_scheduler
-    start_scheduler()
-    
-    yield
-    
-    # Shutdown: stop scheduler
-    stop_scheduler()
+# ================== TWILIO CONFIG (OPTIONAL) ==================
 
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_MESSAGING_SERVICE_SID = os.getenv("TWILIO_MESSAGING_SERVICE_SID", "")
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")  # e.g. "+1617XXXXXXX"
 
-app = FastAPI(
-    title="KRIZZY OPS",
-    version="1.0.0",
-    description="REI Dispo + GovCon Sub-Trap Automation Platform",
-    lifespan=lifespan
+TWILIO_ENABLED = bool(
+    TWILIO_ACCOUNT_SID
+    and TWILIO_AUTH_TOKEN
+    and (TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_NUMBER)
 )
 
+try:
+    from twilio.rest import Client  # type: ignore
+except ImportError:
+    Client = None  # type: ignore[assignment]
+    TWILIO_ENABLED = False
 
-@app.get("/")
-def root() -> Dict[str, Any]:
-    return {"krizzy_ops": "online", "scheduler": "active"}
+if TWILIO_ENABLED and Client is not None:
+    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+else:
+    twilio_client = None
 
 
-@app.get("/health")
-def health() -> Dict[str, Any]:
-    return {"status": "ok"}
-
-
-@app.get("/health/deep")
-async def health_deep() -> Dict[str, Any]:
+def send_sms(to: str, body: str) -> None:
     """
-    Deep health check.
-    Never throws – always returns JSON with integration statuses.
+    Safe Twilio wrapper.
+    - If Twilio is not configured or library missing: logs and returns.
+    - If configured: sends real SMS.
     """
-    results: Dict[str, Any] = {"status": "ok", "integrations": {}}
+    if not TWILIO_ENABLED or twilio_client is None:
+        print(f"[TWILIO_DISABLED] SMS to={to} body={body}")
+        return
 
-    # Airtable
-    try:
-        from src.common.airtable_client import get_airtable
-        at = get_airtable()
-        results["integrations"]["airtable"] = (
-            "configured" if at is not None else "not_configured"
-        )
-    except Exception as e:
-        results["integrations"]["airtable"] = f"error: {e}"
+    kwargs = {"to": to, "body": body}
+    if TWILIO_MESSAGING_SERVICE_SID:
+        kwargs["messaging_service_sid"] = TWILIO_MESSAGING_SERVICE_SID
+    elif TWILIO_FROM_NUMBER:
+        kwargs["from_"] = TWILIO_FROM_NUMBER
+    else:
+        print("[TWILIO_DISABLED] No FROM configured.")
+        return
 
-    # Discord
-    try:
-        from src.common.discord_notify import get_webhook_status
-        results["integrations"]["discord"] = get_webhook_status()
-    except Exception as e:
-        results["integrations"]["discord"] = f"error: {e}"
+    twilio_client.messages.create(**kwargs)
 
-    # Twilio
-    try:
-        from src.common.twilio_client import get_twilio
-        tw = get_twilio()
-        results["integrations"]["twilio"] = (
-            "configured" if tw is not None else "not_configured"
-        )
-    except Exception as e:
-        results["integrations"]["twilio"] = f"error: {e}"
-
-    # GitHub
-    try:
-        from src.tools.github_client import get_github_client
-        gh = get_github_client()
-        results["integrations"]["github"] = (
-            "configured" if gh is not None else "not_configured"
-        )
-    except Exception as e:
-        results["integrations"]["github"] = f"error: {e}"
-
-    # Scheduler
-    try:
-        from src.scheduler import scheduler, SCHEDULER_ENABLED, REI_INTERVAL, GOVCON_INTERVAL
-        results["integrations"]["scheduler"] = {
-            "enabled": SCHEDULER_ENABLED,
-            "running": scheduler.running if SCHEDULER_ENABLED else False,
-            "rei_interval_minutes": REI_INTERVAL,
-            "govcon_interval_minutes": GOVCON_INTERVAL
-        }
-    except Exception as e:
-        results["integrations"]["scheduler"] = f"error: {e}"
-
-    return results
-
-
-@app.get("/rei")
-async def rei() -> Any:
-    """
-    REI Dispo Engine entrypoint.
-    """
-    from src.engines.rei_engine import run_rei_engine
-    result = await run_rei_engine()
-    if isinstance(result, dict):
-        return JSONResponse(result)
-    return result
-
-
-@app.get("/govcon")
-async def govcon() -> Any:
-    """
-    GovCon Sub-Trap Engine entrypoint.
-    """
-    from src.engines.govcon_engine import run_govcon_engine
-    result = await run_govcon_engine()
-    if isinstance(result, dict):
-        return JSONResponse(result)
-    return result
-```
-
----
-
-## ENV VARS TO ADD (Railway)
-```
-SCHEDULER_ENABLED=true
-REI_INTERVAL_MINUTES=15
-GOVCON_INTERVAL_MINUTES=30
-TWILIO_FROM_NUMBER=+1XXXXXXXXXX
-```
-
----
-
-## OPTION B: External Cron (Alternative)
-
-If you prefer external scheduling, use cron-job.org (free) or n8n:
-
-| Job | URL | Interval |
-|-----|-----|----------|
-| REI | `GET https://krizzyopslaunch-production.up.railway.app/rei` | Every 15 min |
-| GovCon | `GET https://krizzyopslaunch-production.up.railway.app/govcon` | Every 30 min |
-
----
-
-## VERIFY (After Deploy)
-```
-GET /health/deep
+# ================== END TWILIO CONFIG ==================

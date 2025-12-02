@@ -23,12 +23,6 @@ def check_twilio_ready() -> bool:
 
 @app.get("/")
 async def root() -> Dict[str, Any]:
-    """
-    Root endpoint: used for manual checks and quick verification.
-
-    This does not send SMS, does not touch Airtable, and will stay green
-    even if those integrations are not configured yet.
-    """
     return {
         "status": "ok",
         "engine": "KRIZZY_OPS",
@@ -46,10 +40,4 @@ async def root() -> Dict[str, Any]:
 
 @app.get("/health")
 async def health() -> Dict[str, str]:
-    """
-    Health endpoint: this is what Railway should hit for health checks.
-
-    It must always return 200 if the process is alive and the app booted.
-    It does NOT depend on Airtable or Twilio.
-    """
     return {"status": "ok"}

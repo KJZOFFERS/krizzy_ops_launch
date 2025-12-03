@@ -2,22 +2,16 @@ from fastapi import FastAPI
 import threading
 import time
 
-from utils.validate_env import validate_env
-
-# Validate environment variables before importing modules that access them
-validate_env()
-
 from engines.rei_dispo_engine import run_rei_engine, rei_lock
 from engines.govcon_subtrap_engine import run_govcon_engine, govcon_lock
 from engines.watchdog_engine import run_watchdog_loop
-from engines.schema_sync_engine import sync_airtable_schema
 
+from utils.validate_env import validate_env
 from utils.kpi import kpi_push
 
 app = FastAPI()
 
-# Sync schema before starting threads
-sync_airtable_schema()
+validate_env()
 
 # Background daemon threads
 threading.Thread(target=run_rei_engine, daemon=True).start()

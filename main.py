@@ -92,4 +92,5 @@ async def run_govcon_manual():
 @app.get("/health")
 async def health():
     return {"status": "OK", "engine": "KRIZZY_OPS", "mode": "thread+watchdog"}
+watchdog"}
 

@@ -10,10 +10,12 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-def read_records(table, formula=None):
+def read_records(table, formula=None, filter_formula=None):
     url = f"{API}/{BASE_ID}/{table}"
     params = {}
-    if formula:
+    if filter_formula:
+        params["filterByFormula"] = filter_formula
+    elif formula:
         params["filterByFormula"] = formula
     r = requests.get(url, headers=HEADERS, params=params)
     r.raise_for_status()

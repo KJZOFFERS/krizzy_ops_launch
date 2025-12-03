@@ -7,18 +7,27 @@ rei_lock = threading.Lock()
 
 def run_rei_engine():
     while True:
+        acquired = False
         if not rei_lock.acquire(blocking=False):
             time.sleep(60)
             continue
+        acquired = True
 
         try:
-            leads = read_records("Leads_REI", formula="Status='NEW'")
+            leads = read_records("Leads_REI", filter_formula="LEN({address}) > 0")
             fire = []
+
+            required = ["key", "address", "ARV", "Ask"]
 
             for lead in leads:
                 fields = lead.get("fields", {})
+                
+                # Skip records missing required fields
+                if not all(fields.get(field) for field in required):
+                    continue
+                
                 arv = fields.get("ARV") or 0
-                ask = fields.get("Asking") or 0
+                ask = fields.get("Ask") or 0
                 rep = fields.get("Repairs") or 0
 
                 if arv == 0:
@@ -44,6 +53,7 @@ def run_rei_engine():
             post_error(f"REI Engine Error: {e}")
 
         finally:
-            rei_lock.release()
+            if acquired:
+                rei_lock.release()
 
         time.sleep(60)

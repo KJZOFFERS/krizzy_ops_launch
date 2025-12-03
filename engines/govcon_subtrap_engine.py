@@ -3,16 +3,20 @@ import time
 from utils.airtable_utils import read_records, update_record
 from utils.discord_utils import post_ops, post_error
 
+TABLE_GOVCON = "GovCon Opportunities"
+
 govcon_lock = threading.Lock()
 
 def run_govcon_engine():
     while True:
+        acquired = False
         if not govcon_lock.acquire(blocking=False):
             time.sleep(300)
             continue
+        acquired = True
 
         try:
-            opps = read_records("GovCon_Opportunities")
+            opps = read_records(TABLE_GOVCON)
 
             for opp in opps:
                 fields = opp.get("fields", {})
@@ -22,7 +26,7 @@ def run_govcon_engine():
                 key = "".join(c for c in sol.lower() if c.isalnum())
                 score = min(100, amount / 1000)
 
-                update_record("GovCon_Opportunities", opp["id"], {
+                update_record(TABLE_GOVCON, opp["id"], {
                     "Score": score,
                     "Dedup_Key": key
                 })
@@ -31,6 +35,7 @@ def run_govcon_engine():
             post_error(f"GovCon Engine Error: {e}")
 
         finally:
-            govcon_lock.release()
+            if acquired:
+                govcon_lock.release()
 
         time.sleep(300)

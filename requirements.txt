@@ -1,23 +1,9 @@
-# === CORE FRAMEWORK ===
-fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
+fastapi
+uvicorn
+httpx
+pyairtable
+apscheduler
+python-dotenv
+pydantic
+aiohttp
 
-# === HTTP CLIENTS ===
-httpx>=0.27.0
-requests>=2.31.0
-
-# === ASYNC SUPPORT ===
-anyio>=4.2.0
-python-multipart>=0.0.6
-
-# === SCHEDULING / BACKGROUND TASKS ===
-apscheduler>=3.10.4
-
-# === EXTERNAL INTEGRATIONS ===
-twilio>=8.10.0
-aiohttp>=3.9.0
-
-# === UTILITIES ===
-python-dotenv>=1.0.0

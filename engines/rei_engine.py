@@ -1,14 +1,14 @@
 import threading
 import time
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from utils.airtable_utils import read_records, update_record
 from utils.discord_utils import post_error, post_ops
 
 TABLE_REI = "Leads_REI"
 
-# All known fields in the Leads_REI table
-REI_FIELDS = {
+# Exact fields for Leads_REI from Airtable
+LEADS_REI_FIELDS: List[str] = [
     "key",
     "address",
     "ARV",
@@ -16,22 +16,32 @@ REI_FIELDS = {
     "Beds",
     "Baths",
     "SqFt",
+    "Lot_SqFt",
+    "Repairs_Note",
+    "Comps_JSON",
     "DOM",
     "Source_URL",
+    "Geo_Lat",
+    "Geo_Lng",
     "Rent_Est",
     "School_Score",
     "Crime_Index",
-    # computed fields – create these columns in Airtable once:
-    "Spread",
-    "Score",
-}
+    "Price_Sanity_Flag",
+    "Ingest_TS",
+]
+
+# Only update this — it exists in Airtable
+LEADS_REI_UPDATE_FIELDS = {"Price_Sanity_Flag"}
 
 rei_lock = threading.Lock()
 
 
 def _safe_update_lead(record_id: str, fields: Dict[str, Any]) -> None:
-    """Only send fields that actually exist in Airtable."""
-    payload = {k: v for k, v in fields.items() if k in REI_FIELDS}
+    payload = {
+        k: v
+        for k, v in fields.items()
+        if k in LEADS_REI_UPDATE_FIELDS and k in LEADS_REI_FIELDS
+    }
     if not payload:
         return
     update_record(TABLE_REI, record_id, payload)
@@ -46,12 +56,12 @@ def run_rei_engine() -> None:
         try:
             records = read_records(TABLE_REI)
 
-            top_deals = []
+            ranked = []
 
             for rec in records:
                 fields = rec.get("fields", {})
 
-                if not all(x in fields for x in ("address", "ARV", "Ask")):
+                if "ARV" not in fields or "Ask" not in fields:
                     continue
 
                 try:
@@ -63,33 +73,28 @@ def run_rei_engine() -> None:
                 if arv <= 0:
                     continue
 
-                # optional repairs – if the field doesn't exist or isn't numeric, treat as 0
-                try:
-                    repairs = float(fields.get("Repairs") or 0)
-                except (TypeError, ValueError):
-                    repairs = 0.0
+                spread = arv - ask
+                spread_ratio = spread / arv
 
-                spread = arv - ask - repairs
-                score = (spread / arv) * 100
+                # simple sanity flag
+                sane = spread_ratio >= 0.05
+                _safe_update_lead(rec["id"], {"Price_Sanity_Flag": sane})
 
-                _safe_update_lead(rec["id"], {
-                    "Spread": spread,
-                    "Score": score,
-                })
+                ranked.append((spread_ratio, fields))
 
-                top_deals.append((score, fields))
+            ranked.sort(key=lambda x: x[0], reverse=True)
+            top = ranked[:3]
 
-            # send top 3 to Discord
-            top_deals = sorted(top_deals, key=lambda x: x[0], reverse=True)[:3]
-            if top_deals:
+            if top:
                 lines = []
-                for score, f in top_deals:
+                for ratio, f in top:
                     addr = f.get("address", "Unknown")
                     arv = f.get("ARV")
                     ask = f.get("Ask")
-                    lines.append(f"- {addr} | Score={score:.1f} | ARV={arv} | Ask={ask}")
-                msg = "🔥 Top REI Deals:\n" + "\n".join(lines)
-                post_ops(msg)
+                    lines.append(
+                        f"- {addr} | spread_ratio={ratio:.2%} | ARV={arv} | Ask={ask}"
+                    )
+                post_ops("🔥 Top REI Leads:\n" + "\n".join(lines))
 
         except Exception as e:
             post_error(f"REI Engine Error: {e}")

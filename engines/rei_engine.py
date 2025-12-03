@@ -7,7 +7,7 @@ from utils.discord_utils import post_error, post_ops
 
 TABLE_REI = "Leads_REI"
 
-# Exact fields for Leads_REI from Airtable
+# Exact fields for Leads_REI from Airtable schema
 LEADS_REI_FIELDS: List[str] = [
     "key",
     "address",
@@ -30,13 +30,17 @@ LEADS_REI_FIELDS: List[str] = [
     "Ingest_TS",
 ]
 
-# Only update this — it exists in Airtable
+# Only this field is updated by the engine (it exists in Airtable)
 LEADS_REI_UPDATE_FIELDS = {"Price_Sanity_Flag"}
 
 rei_lock = threading.Lock()
 
 
 def _safe_update_lead(record_id: str, fields: Dict[str, Any]) -> None:
+    """
+    Only send fields that exist in Leads_REI and are in our update whitelist.
+    This guarantees no 422 from invalid field names.
+    """
     payload = {
         k: v
         for k, v in fields.items()
@@ -48,6 +52,15 @@ def _safe_update_lead(record_id: str, fields: Dict[str, Any]) -> None:
 
 
 def run_rei_engine() -> None:
+    """
+    REI sanity / ranking engine.
+
+    - Reads all records from Leads_REI.
+    - Computes spread_ratio = (ARV - Ask) / ARV when ARV > 0.
+    - Sets Price_Sanity_Flag = True if spread_ratio >= 5%.
+    - Sends top 3 by spread_ratio to Discord.
+    - Never writes any field that isn't in Airtable schema.
+    """
     while True:
         if not rei_lock.acquire(blocking=False):
             time.sleep(60)
@@ -55,7 +68,6 @@ def run_rei_engine() -> None:
 
         try:
             records = read_records(TABLE_REI)
-
             ranked = []
 
             for rec in records:
@@ -76,8 +88,7 @@ def run_rei_engine() -> None:
                 spread = arv - ask
                 spread_ratio = spread / arv
 
-                # simple sanity flag
-                sane = spread_ratio >= 0.05
+                sane = spread_ratio >= 0.05  # 5%+ spread is "sane"
                 _safe_update_lead(rec["id"], {"Price_Sanity_Flag": sane})
 
                 ranked.append((spread_ratio, fields))
@@ -94,7 +105,7 @@ def run_rei_engine() -> None:
                     lines.append(
                         f"- {addr} | spread_ratio={ratio:.2%} | ARV={arv} | Ask={ask}"
                     )
-                post_ops("🔥 Top REI Leads:\n" + "\n".join(lines))
+                post_ops("🔥 Top REI Leads_REI (by spread):\n" + "\n".join(lines))
 
         except Exception as e:
             post_error(f"REI Engine Error: {e}")
@@ -102,3 +113,4 @@ def run_rei_engine() -> None:
         finally:
             rei_lock.release()
             time.sleep(60)
+

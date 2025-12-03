@@ -7,6 +7,7 @@ from utils.discord_utils import post_error
 
 TABLE_GOVCON = "GovCon Opportunities"
 
+# Exact fields for GovCon Opportunities from Airtable schema
 GOVCON_FIELDS: List[str] = [
     "Opportunity Name",
     "Agency",
@@ -29,12 +30,17 @@ GOVCON_FIELDS: List[str] = [
     "Opportunity Score (AI)",
 ]
 
+# Only this field is updated by the engine (it exists in Airtable)
 GOVCON_UPDATE_FIELDS = {"Hotness Score"}
 
 govcon_lock = threading.Lock()
 
 
 def _safe_update_govcon(record_id: str, fields: Dict[str, Any]) -> None:
+    """
+    Only send fields that exist in GovCon Opportunities and are in our update whitelist.
+    This guarantees no 422 from invalid field names.
+    """
     payload = {
         k: v
         for k, v in fields.items()
@@ -46,6 +52,13 @@ def _safe_update_govcon(record_id: str, fields: Dict[str, Any]) -> None:
 
 
 def run_govcon_engine() -> None:
+    """
+    GovCon scoring engine.
+
+    - Reads all GovCon Opportunities.
+    - Computes Hotness Score from Total Value (simple baseline).
+    - Writes Hotness Score only.
+    """
     while True:
         if not govcon_lock.acquire(blocking=False):
             time.sleep(300)

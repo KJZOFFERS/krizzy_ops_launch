@@ -1,24 +1,40 @@
 import threading
 import asyncio
 import time
-
 from fastapi import FastAPI
-from src.app import app  # FastAPI app
+from src.app import app
 
-# Import engines
+# Engines
 from src.engines.rei_engine import run_rei_engine
 from src.engines.govcon_engine import run_govcon_engine
 
+# Watchdog & logging
+from src.common.discord_notify import notify_error, notify_ops
 
-# ===============================
-# Thread-safe engine wrappers
-# ===============================
+
+# ============================================================
+# THREAD LOCKS (prevents double-runs and race conditions)
+# ============================================================
 rei_lock = threading.Lock()
 govcon_lock = threading.Lock()
 
 
+# ============================================================
+# WATCHDOG PROTECTION
+# ============================================================
+def watchdog_loop():
+    while True:
+        try:
+            notify_ops("Watchdog: System running normally.")
+        except Exception as e:
+            notify_error(f"Watchdog error: {e}")
+        time.sleep(30)  # Check every 30 seconds
+
+
+# ============================================================
+# ENGINE LOOP WRAPPERS
+# ============================================================
 def rei_loop():
-    """Runs REI engine every 60 seconds."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -27,13 +43,11 @@ def rei_loop():
             with rei_lock:
                 loop.run_until_complete(run_rei_engine())
         except Exception as e:
-            print(f"[REI LOOP ERROR] {e}")
-
-        time.sleep(60)
+            notify_error(f"REI Loop Crash: {e}")
+        time.sleep(60)  # 1 minute
 
 
 def govcon_loop():
-    """Runs GovCon engine every 300 seconds."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -42,40 +56,40 @@ def govcon_loop():
             with govcon_lock:
                 loop.run_until_complete(run_govcon_engine())
         except Exception as e:
-            print(f"[GOVCON LOOP ERROR] {e}")
+            notify_error(f"GovCon Loop Crash: {e}")
+        time.sleep(300)  # 5 minutes
 
-        time.sleep(300)
 
-
-# ===============================
-# Start threads on startup
-# ===============================
+# ============================================================
+# FASTAPI ON_STARTUP — SPAWNS THREADS
+# ============================================================
 @app.on_event("startup")
 def start_background_engines():
-    rei_thread = threading.Thread(target=rei_loop, daemon=True)
-    govcon_thread = threading.Thread(target=govcon_loop, daemon=True)
+    notify_ops("🔥 KRIZZY OPS Launching Thread Engines…")
 
-    rei_thread.start()
-    govcon_thread.start()
+    threading.Thread(target=rei_loop, daemon=True).start()
+    threading.Thread(target=govcon_loop, daemon=True).start()
+    threading.Thread(target=watchdog_loop, daemon=True).start()
 
-    print("🔥 KRIZZY OPS Engines Started")
+    notify_ops("🔥 KRIZZY OPS Engines Running 24/7")
 
 
-# ===============================
-# Manual Trigger Endpoints
-# ===============================
+# ============================================================
+# MANUAL TRIGGER ROUTES
+# ============================================================
 @app.get("/run/rei")
-async def manual_rei():
+async def run_rei_manual():
     with rei_lock:
         return await run_rei_engine()
 
 
 @app.get("/run/govcon")
-async def manual_govcon():
+async def run_govcon_manual():
     with govcon_lock:
         return await run_govcon_engine()
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "engine": "KRIZZY_OPS"}
+    return {"status": "OK", "engine": "KRIZZY_OPS", "mode": "thread+watchdog"}
+

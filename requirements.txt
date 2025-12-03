@@ -1,9 +1,6 @@
 fastapi
 uvicorn
-httpx
-pyairtable
-apscheduler
-python-dotenv
-pydantic
+requests
 aiohttp
-
+python-dotenv
+twilio

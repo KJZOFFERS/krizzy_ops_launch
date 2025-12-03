@@ -1,0 +1,21 @@
+# KRIZZY OPS - Cursor Rules
+
+## Architecture
+- FastAPI app in main.py
+- Engines in engines/ directory (rei_dispo_engine, govcon_subtrap_engine, watchdog_engine)
+- Utilities in utils/ directory (airtable_utils, discord_utils, twilio_utils, validate_env, kpi)
+- Threading locks prevent double-runs
+- Background daemon threads run continuously
+
+## Code Style
+- Keep functions simple and focused
+- Use threading.Lock() for engine synchronization
+- Post errors to Discord via post_error()
+- Post ops updates via post_ops()
+- Validate environment variables on startup
+
+## Deployment
+- Railway.app with Nixpacks builder
+- Uvicorn ASGI server
+- Health check at /health endpoint
+- Manual triggers at /trigger/rei and /trigger/govcon

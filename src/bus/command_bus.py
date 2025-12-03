@@ -24,7 +24,3 @@ class CommandBus:
             notify_error(f"CommandBus Error [{command}]: {e}")
             return {"error": str(e)}
 
-
-
-# Singleton bus instance
-bus = CommandBus()

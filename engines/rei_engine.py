@@ -108,7 +108,7 @@ def run_rei_engine() -> None:
                 post_ops("🔥 Top REI Leads_REI (by spread):\n" + "\n".join(lines))
 
         except Exception as e:
-            post_error(f"REI Engine Error: {e}")
+            post_error(f"🔴 REI Engine Error: {type(e).__name__}: {e}")
 
         finally:
             rei_lock.release()

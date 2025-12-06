@@ -84,7 +84,7 @@ def run_govcon_engine() -> None:
                 _safe_update_govcon(rec["id"], {"Hotness Score": score})
 
         except Exception as e:
-            post_error(f"GovCon Engine Error: {e}")
+            post_error(f"🔴 GovCon Engine Error: {type(e).__name__}: {e}")
 
         finally:
             govcon_lock.release()

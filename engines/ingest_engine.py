@@ -16,79 +16,71 @@ TABLE_GOVCON_OPPORTUNITIES = "GovCon Opportunities"
 ingest_lock = threading.Lock()
 
 
+def _safe_float(value):
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
 def _ingest_rei_records() -> Dict[str, int]:
     """
     Ingest REI records from Inbound_REI_Raw to Leads_REI.
-
-    Staging (Inbound_REI_Raw) expected fields:
-      External_Id, Source, Name, Phone, Address, City, State, ZIP,
-      ARV, Asking, Repairs, Raw_Payload, Status, Error_Message
-
-    Production (Leads_REI) fields we write:
-      External_Id, Source, Name, Phone, Address, City, State, ZIP,
-      ARV, Asking, Repairs, Spread, Status, Outbound_Status, Ingest_TS
-      (and also old 'address' field for compatibility)
+    Processes records where Status is NEW or ERROR.
+    Returns {"processed": int, "errors": int}
     """
     processed = 0
     errors = 0
 
     try:
+        # Treat both NEW and ERROR as ingestable so we can retry failed records
         new_records = read_records(
             TABLE_INBOUND_REI,
-            filter_formula="{Status}='NEW'"
+            filter_formula="OR({Status}='NEW',{Status}='ERROR')"
         )
 
         for rec in new_records:
-            record_id = rec.get("id")
-            fields = rec.get("fields", {}) or {}
+            record_id = rec["id"]
+            fields = rec.get("fields", {})
 
             try:
+                # Extract numeric fields
+                arv = _safe_float(fields.get("ARV"))
+                asking = _safe_float(fields.get("Asking"))
+                repairs = _safe_float(fields.get("Repairs"))
+
+                spread = None
+                if arv is not None and asking is not None and repairs is not None:
+                    spread = arv - asking - repairs
+
                 lead_fields: Dict[str, Any] = {}
 
-                # 1:1 mappings from staging to production (new schema)
-                copy_keys = [
-                    "External_Id",
-                    "Source",
-                    "Name",
-                    "Phone",
-                    "Address",
-                    "City",
-                    "State",
-                    "ZIP",
-                    "ARV",
-                    "Asking",
-                    "Repairs",
-                ]
-                for key in copy_keys:
-                    value = fields.get(key)
-                    if value not in (None, ""):
-                        lead_fields[key] = value
+                # Direct mappings based on your actual Airtable schema
+                # Staging columns (from CSV): Name, Source, External_Id, ARV, Asking, Repairs, Address, ...
+                # Leads_REI columns (from CSV): address, ARV, Ask, ..., Ingest_TS, External_Id, Source, Name, Asking, Repairs, Spread, Status, Outbound_Status
+                lead_fields["External_Id"] = fields.get("External_Id")
+                lead_fields["Source"] = fields.get("Source")
+                lead_fields["Name"] = fields.get("Name")
+                lead_fields["ARV"] = arv
+                lead_fields["Asking"] = asking
+                lead_fields["Repairs"] = repairs
+                lead_fields["Spread"] = spread
 
-                # Also map Address -> old 'address' field for compatibility
-                if fields.get("Address"):
+                # Address mapping (staging: "Address" → Leads_REI: "address")
+                if "Address" in fields and fields["Address"]:
                     lead_fields["address"] = fields["Address"]
 
-                # Compute Spread if numbers are present
-                arv = fields.get("ARV")
-                asking = fields.get("Asking")
-                repairs = fields.get("Repairs")
-                try:
-                    if arv is not None and asking is not None and repairs is not None:
-                        spread = float(arv) - float(asking) - float(repairs)
-                        lead_fields["Spread"] = spread
-                except Exception:
-                    # If casting fails, ignore and leave Spread empty
-                    pass
-
-                # Lifecycle fields
+                # Default engine state fields
                 lead_fields["Status"] = "NEW"
                 lead_fields["Outbound_Status"] = "NOT_CONTACTED"
                 lead_fields["Ingest_TS"] = datetime.utcnow().isoformat()
 
-                # Write into Leads_REI
+                # Write to production table
                 write_record(TABLE_LEADS_REI, lead_fields)
 
-                # Mark staging record as INGESTED
+                # Mark staging record as INGESTED (clear old error if any)
                 update_record(
                     TABLE_INBOUND_REI,
                     record_id,
@@ -99,9 +91,9 @@ def _ingest_rei_records() -> Dict[str, int]:
 
             except Exception as e:
                 errors += 1
-                error_msg = f"{type(e).__name__}: {e}"
+                error_msg = f"{type(e).__name__}: {str(e)}"
 
-                # Mark staging record as ERROR (best effort)
+                # Mark staging record as ERROR with message
                 try:
                     update_record(
                         TABLE_INBOUND_REI,
@@ -112,9 +104,12 @@ def _ingest_rei_records() -> Dict[str, int]:
                         },
                     )
                 except Exception:
+                    # Best effort; log to Discord at least
                     pass
 
-                post_error(f"🚨 REI Ingest Error for record {record_id}: {error_msg}")
+                post_error(
+                    f"🚨 REI Ingest Error for record {record_id}: {error_msg}"
+                )
 
     except Exception as e:
         post_error(f"🔴 REI Ingest Fatal Error: {type(e).__name__}: {e}")
@@ -126,68 +121,65 @@ def _ingest_rei_records() -> Dict[str, int]:
 def _ingest_govcon_records() -> Dict[str, int]:
     """
     Ingest GovCon records from Inbound_GovCon_Raw to GovCon Opportunities.
-
-    Staging (Inbound_GovCon_Raw) expected fields:
-      External_Id, Source, Solicitation Number, Title, Agency,
-      NAICS, Set_Aside, Response_Deadline, Estimated_Value,
-      Raw_Payload, Status, Error_Message
-
-    Production (GovCon Opportunities) fields we write:
-      External_Id, Source, Solicitation Number, Title, Agency,
-      NAICS, Set_Aside, Response_Deadline, Estimated_Value, Status
+    Processes records where Status is NEW or ERROR.
+    Returns {"processed": int, "errors": int}
     """
     processed = 0
     errors = 0
 
     try:
+        # Also allow retry of ERROR records for GovCon
         new_records = read_records(
             TABLE_INBOUND_GOVCON,
-            filter_formula="{Status}='NEW'"
+            filter_formula="OR({Status}='NEW',{Status}='ERROR')"
         )
 
         for rec in new_records:
-            record_id = rec.get("id")
-            fields = rec.get("fields", {}) or {}
+            record_id = rec["id"]
+            fields = rec.get("fields", {})
 
             try:
+                # Basic field mapping based on the schema we discussed
                 opp_fields: Dict[str, Any] = {}
 
-                copy_keys = [
-                    "External_Id",
-                    "Source",
-                    "Solicitation Number",
-                    "Title",
-                    "Agency",
-                    "NAICS",
-                    "Set_Aside",
-                    "Response_Deadline",
-                    "Estimated_Value",
-                ]
-                for key in copy_keys:
-                    value = fields.get(key)
-                    if value not in (None, ""):
-                        opp_fields[key] = value
+                # Staging expected: External_Id, Source, Solicitation Number, Title, Agency,
+                # NAICS, Set_Aside, Response_Deadline, Estimated_Value, Raw_Payload, Status, Error_Message
+                # Production: GovCon Opportunities with equivalent fields
+                mapping = {
+                    "External_Id": "External_Id",
+                    "Source": "Source",
+                    "Solicitation Number": "Solicitation Number",
+                    "Title": "Title",
+                    "Agency": "Agency",
+                    "NAICS": "NAICS",
+                    "Set_Aside": "Set_Aside",
+                    "Response_Deadline": "Response_Deadline",
+                    "Estimated_Value": "Estimated_Value",
+                }
 
-                # Lifecycle field
+                for src_field, dest_field in mapping.items():
+                    if src_field in fields and fields[src_field] is not None:
+                        opp_fields[dest_field] = fields[src_field]
+
+                # Default engine fields on clean table
                 opp_fields["Status"] = "NEW"
 
-                # Write into GovCon Opportunities
+                # Write to production table
                 write_record(TABLE_GOVCON_OPPORTUNITIES, opp_fields)
 
                 # Mark staging record as INGESTED
                 update_record(
                     TABLE_INBOUND_GOVCON,
                     record_id,
-                    {"Status": "INGESTED", "Error_Message": ""}
+                    {"Status": "INGESTED", "Error_Message": ""},
                 )
 
                 processed += 1
 
             except Exception as e:
                 errors += 1
-                error_msg = f"{type(e).__name__}: {e}"
+                error_msg = f"{type(e).__name__}: {str(e)}"
 
-                # Mark staging record as ERROR (best effort)
                 try:
                     update_record(
                         TABLE_INBOUND_GOVCON,
@@ -200,7 +192,9 @@ def _ingest_govcon_records() -> Dict[str, int]:
                 except Exception:
                     pass
 
-                post_error(f"🚨 GovCon Ingest Error for record {record_id}: {error_msg}")
+                post_error(
+                    f"🚨 GovCon Ingest Error for record {record_id}: {error_msg}"
+                )
 
     except Exception as e:
         post_error(f"🔴 GovCon Ingest Fatal Error: {type(e).__name__}: {e}")
@@ -212,6 +206,7 @@ def _ingest_govcon_records() -> Dict[str, int]:
 def run_ingest_cycle() -> Dict[str, Any]:
     """
     Run a single ingestion cycle for both REI and GovCon.
+    Returns summary stats.
     Thread-safe via ingest_lock.
     """
     if not ingest_lock.acquire(blocking=False):
@@ -229,7 +224,7 @@ def run_ingest_cycle() -> Dict[str, Any]:
 
         if total_processed > 0 or total_errors > 0:
             post_ops(
-                "✅ Ingest Complete: "
+                f"✅ Ingest Complete: "
                 f"REI={rei_stats['processed']}/{rei_stats['errors']}, "
                 f"GovCon={govcon_stats['processed']}/{govcon_stats['errors']}"
             )

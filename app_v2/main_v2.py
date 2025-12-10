@@ -6,6 +6,7 @@ from app_v2.thread_supervisor import supervisor
 from app_v2.utils.logger import get_logger
 
 # Import engines
+from app_v2.engines.input_engine import input_loop
 from app_v2.engines.underwriting_engine import underwriting_loop
 
 logger = get_logger(__name__)
@@ -22,6 +23,7 @@ async def startup():
     start_orchestrator()
 
     # Register engines with supervisor
+    supervisor.register_engine("input", input_loop)
     supervisor.register_engine("underwriting", underwriting_loop)
     # TODO: Register other engines as they're built
 
@@ -48,6 +50,15 @@ def health():
 def metrics():
     """System metrics"""
     return system_state.get_status()
+
+
+@app.post("/trigger/input")
+def trigger_input():
+    """Manual trigger for input engine (one cycle)"""
+    from app_v2.engines.input_engine import InputEngine
+    engine = InputEngine()
+    result = engine.run_input_cycle()
+    return {"status": "ok", **result}
 
 
 @app.post("/trigger/underwriting")

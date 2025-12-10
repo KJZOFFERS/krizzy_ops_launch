@@ -9,9 +9,15 @@ from app_v2.utils.logger import get_logger
 from app_v2.engines.input_engine import input_loop
 from app_v2.engines.underwriting_engine import underwriting_loop
 
+# Import LLM control router
+from app_v2.llm_control.command_bus import router as llm_router
+
 logger = get_logger(__name__)
 
 app = FastAPI(title="KRIZZY OPS V2", version="2.0.0")
+
+# Mount LLM command bus
+app.include_router(llm_router, prefix="/v2/llm", tags=["llm_control"])
 
 
 @app.on_event("startup")

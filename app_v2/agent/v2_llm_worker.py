@@ -24,8 +24,16 @@ from app_v2.agent.prompt import SYSTEM_PROMPT
 
 
 def get_v2_api_url() -> str:
-    """Get V2 API base URL from environment or default to localhost"""
-    return os.environ.get("V2_APP_URL", "http://localhost:8080")
+    """
+    Get V2 API base URL.
+
+    Hard-wired to production Railway URL so we never hit localhost by accident.
+    If you REALLY want to override, set V2_APP_URL; otherwise this stays prod.
+    """
+    return os.environ.get(
+        "V2_APP_URL",
+        "https://krizzyopslaunch-production.up.railway.app"
+    )
 
 
 def call_llm_command(api_url: str, payload: Dict[str, Any]) -> Dict[str, Any]:

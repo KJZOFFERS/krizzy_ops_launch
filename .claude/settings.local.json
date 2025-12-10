@@ -3,7 +3,8 @@
     "allow": [
       "Bash(git commit:*)",
       "Bash(git push)",
-      "Bash(python -m py_compile:*)"
+      "Bash(python -m py_compile:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

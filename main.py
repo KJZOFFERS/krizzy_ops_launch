@@ -12,8 +12,10 @@ from engines.watchdog_engine import run_watchdog_loop
 from engines.outbound_engine import run_outbound_engine, outbound_lock, get_outbound_status
 from engines.ingest_engine import run_ingest_cycle
 from utils.kpi import kpi_push
+from app_v2.llm_control.command_bus import router as llm_v2_router
 
 app = FastAPI()
+app.include_router(llm_v2_router, prefix="/v2/llm", tags=["llm_v2"])
 
 # Track daemon thread status
 _daemon_threads_started = False

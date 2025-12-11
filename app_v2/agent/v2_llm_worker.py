@@ -27,13 +27,10 @@ def get_v2_api_url() -> str:
     """
     Get V2 API base URL.
 
-    Hard-wired to production Railway URL so we never hit localhost by accident.
-    If you REALLY want to override, set V2_APP_URL; otherwise this stays prod.
+    FORCE using the production Railway URL.
+    Ignores any V2_APP_URL env var to avoid bad hosts.
     """
-    return os.environ.get(
-        "V2_APP_URL",
-        "https://krizzyopslaunch-production.up.railway.app"
-    )
+    return "https://krizzyopslaunch-production.up.railway.app"
 
 
 def call_llm_command(api_url: str, payload: Dict[str, Any]) -> Dict[str, Any]:

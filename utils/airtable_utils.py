@@ -4,8 +4,8 @@ from typing import Optional, Dict, Any, List
 
 from utils.discord_utils import post_error
 
-BASE_ID = os.environ["AIRTABLE_BASE_ID"]
-API_KEY = os.environ["AIRTABLE_API_KEY"]
+BASE_ID = os.getenv("AIRTABLE_BASE_ID", "")
+API_KEY = os.getenv("AIRTABLE_API_KEY", "")
 API = "https://api.airtable.com/v0"
 
 HEADERS = {

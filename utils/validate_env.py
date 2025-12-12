@@ -1,4 +1,7 @@
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 REQUIRED = [
     "AIRTABLE_API_KEY",
@@ -13,4 +16,4 @@ REQUIRED = [
 def validate_env():
     missing = [v for v in REQUIRED if v not in os.environ]
     if missing:
-        raise Exception(f"Missing env vars: {missing}")
+        logger.warning(f"Missing env vars (some features may not work): {missing}")

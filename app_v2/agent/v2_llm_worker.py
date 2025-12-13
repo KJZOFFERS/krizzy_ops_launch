@@ -1,51 +1,25 @@
 import time
-from models import Job, Ledger
+import logging
 
-MAX_ATTEMPTS = 3
+logging.basicConfig(level=logging.INFO)
 
-def run_pipeline(engine, db):
-    # THIS IS INTENTIONALLY SIMPLE
-    # REAL LOGIC CAN CHANGE LATER WITHOUT TOUCHING INFRA
+def run_worker_loop():
+    """
+    This is the execution kernel worker.
+    It MUST block forever.
+    """
 
-    ledger_entry = Ledger(
-        engine=engine,
-        record_id="system",
-        action="pipeline_run",
-        value_estimate=0,
-        cash_realized=0,
-        cost=0
-    )
-    db.add(ledger_entry)
+    logging.info("KRIZZY OPS WORKER STARTED")
 
-def worker_loop(db_factory):
     while True:
-        db = db_factory()
         try:
-            job = (
-                db.query(Job)
-                .filter(Job.status == "pending")
-                .order_by(Job.created_at.asc())
-                .first()
-            )
+            # === REAL WORK GOES HERE LATER ===
+            # For now this proves execution is alive.
+            logging.info("KRIZZY OPS WORKER TICK")
 
-            if not job:
-                time.sleep(5)
-                continue
-
-            job.status = "running"
-            db.commit()
-
-            run_pipeline(job.engine, db)
-
-            job.status = "done"
-            db.commit()
+            # Example placeholder delay
+            time.sleep(30)
 
         except Exception as e:
-            db.rollback()
-            job.attempts += 1
-            job.last_error = str(e)
-            job.status = "failed" if job.attempts >= MAX_ATTEMPTS else "pending"
-            db.commit()
-
-        finally:
-            db.close()
+            logging.exception(f"Worker error: {e}")
+            time.sleep(5)

@@ -6,7 +6,9 @@
       "Bash(python -m py_compile:*)",
       "Bash(git push:*)",
       "Bash(python -c:*)",
-      "Bash(python -m app_v2.agent.v2_llm_worker:*)"
+      "Bash(python -m app_v2.agent.v2_llm_worker:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

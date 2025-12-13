@@ -9,7 +9,8 @@
       "Bash(python -m app_v2.agent.v2_llm_worker:*)",
       "Bash(git checkout:*)",
       "Bash(git add:*)",
-      "Bash(git grep:*)"
+      "Bash(git grep:*)",
+      "Bash(python -m compileall:*)"
     ],
     "deny": [],
     "ask": []

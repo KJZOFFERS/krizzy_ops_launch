@@ -59,3 +59,25 @@ def health():
         "daemons_started": DAEMONS_STARTED,
         "worker_enabled": worker_enabled
     }
+
+
+@app.get("/output")
+def show_output():
+    """
+    Surface a simple operational snapshot for quick manual checks.
+
+    This endpoint is intentionally lightweight so operators can "show output"
+    from the execution kernel without digging through logs. It mirrors the
+    health status while adding a human-friendly message about the current
+    daemon state.
+    """
+    worker_enabled = os.getenv("WORKER_ENABLED", "true").lower() == "true"
+
+    status = "running" if worker_enabled and DAEMONS_STARTED else "standby"
+
+    return {
+        "message": "Execution kernel output available",
+        "status": status,
+        "daemons_started": DAEMONS_STARTED,
+        "worker_enabled": worker_enabled,
+    }

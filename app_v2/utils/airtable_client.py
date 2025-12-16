@@ -2,6 +2,7 @@ import requests
 from typing import List, Dict, Any, Optional
 from app_v2 import config
 from app_v2.utils.logger import get_logger
+from app_v2.utils.airtable_schema import filter_fields, refresh_schema
 
 logger = get_logger(__name__)
 
@@ -38,10 +39,17 @@ def read_records(
 def write_record(table: str, fields: Dict[str, Any]) -> Dict[str, Any]:
     """Create a new record in Airtable table"""
     url = f"{API_BASE}/{config.AIRTABLE_BASE_ID}/{table}"
-    payload = {"fields": fields}
+    filtered = filter_fields(fields, table, config.AIRTABLE_BASE_ID, config.AIRTABLE_API_KEY)
+    payload = {"fields": filtered}
 
     try:
         response = requests.post(url, headers=HEADERS, json=payload, timeout=10)
+        if response.status_code == 422:
+            logger.warning(f"Airtable 422 on POST to {table}: {response.text}")
+            refresh_schema(config.AIRTABLE_BASE_ID, config.AIRTABLE_API_KEY)
+            filtered = filter_fields(fields, table, config.AIRTABLE_BASE_ID, config.AIRTABLE_API_KEY)
+            payload = {"fields": filtered}
+            response = requests.post(url, headers=HEADERS, json=payload, timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -52,10 +60,17 @@ def write_record(table: str, fields: Dict[str, Any]) -> Dict[str, Any]:
 def update_record(table: str, record_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
     """Update an existing record in Airtable table"""
     url = f"{API_BASE}/{config.AIRTABLE_BASE_ID}/{table}/{record_id}"
-    payload = {"fields": fields}
+    filtered = filter_fields(fields, table, config.AIRTABLE_BASE_ID, config.AIRTABLE_API_KEY)
+    payload = {"fields": filtered}
 
     try:
         response = requests.patch(url, headers=HEADERS, json=payload, timeout=10)
+        if response.status_code == 422:
+            logger.warning(f"Airtable 422 on PATCH to {table}/{record_id}: {response.text}")
+            refresh_schema(config.AIRTABLE_BASE_ID, config.AIRTABLE_API_KEY)
+            filtered = filter_fields(fields, table, config.AIRTABLE_BASE_ID, config.AIRTABLE_API_KEY)
+            payload = {"fields": filtered}
+            response = requests.patch(url, headers=HEADERS, json=payload, timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -68,13 +83,25 @@ def batch_create(table: str, records: List[Dict[str, Any]]) -> List[Dict[str, An
     url = f"{API_BASE}/{config.AIRTABLE_BASE_ID}/{table}"
     created = []
 
-    # Split into chunks of 10
     for i in range(0, len(records), 10):
         chunk = records[i:i + 10]
-        payload = {"records": chunk}
+        filtered_chunk = [
+            {"fields": filter_fields(r.get("fields", r), table, config.AIRTABLE_BASE_ID, config.AIRTABLE_API_KEY)}
+            for r in chunk
+        ]
+        payload = {"records": filtered_chunk}
 
         try:
             response = requests.post(url, headers=HEADERS, json=payload, timeout=10)
+            if response.status_code == 422:
+                logger.warning(f"Airtable 422 on batch create to {table}: {response.text}")
+                refresh_schema(config.AIRTABLE_BASE_ID, config.AIRTABLE_API_KEY)
+                filtered_chunk = [
+                    {"fields": filter_fields(r.get("fields", r), table, config.AIRTABLE_BASE_ID, config.AIRTABLE_API_KEY)}
+                    for r in chunk
+                ]
+                payload = {"records": filtered_chunk}
+                response = requests.post(url, headers=HEADERS, json=payload, timeout=10)
             response.raise_for_status()
             created.extend(response.json().get("records", []))
         except requests.exceptions.RequestException as e:

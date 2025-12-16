@@ -2,10 +2,6 @@ import os
 from fastapi import FastAPI, HTTPException
 import threading
 
-# Import DB infrastructure
-from app_v2.database import engine, Base
-import app_v2.models
-
 app = FastAPI()
 
 DAEMONS_STARTED = False
@@ -15,12 +11,9 @@ DAEMONS_STARTED = False
 def startup_event():
     """
     Boot-time execution kernel.
-    Creates DB tables and starts autonomous worker loop.
+    Starts autonomous worker loop. DB-free startup.
     """
     global DAEMONS_STARTED
-
-    # Create all tables
-    Base.metadata.create_all(bind=engine)
 
     # Only start worker if enabled
     worker_enabled = os.getenv("WORKER_ENABLED", "true").lower() == "true"

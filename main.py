@@ -1,12 +1,21 @@
 import os
-from fastapi import FastAPI, HTTPException
+import time
+from fastapi import FastAPI, HTTPException, Query
 import threading
+from sqlalchemy.exc import OperationalError
 
 # Import DB infrastructure
 from app_v2.database import engine, Base
 import app_v2.models
 
 app = FastAPI()
+
+
+def require_init_key(key: str | None):
+    """Validate the INIT_KEY for protected admin endpoints."""
+    expected = os.getenv("INIT_KEY")
+    if not expected or key != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 DAEMONS_STARTED = False
 
@@ -15,12 +24,10 @@ DAEMONS_STARTED = False
 def startup_event():
     """
     Boot-time execution kernel.
-    Creates DB tables and starts autonomous worker loop.
+    Starts autonomous worker loop if enabled.
+    NOTE: DB tables are NOT created here - use /admin/init endpoint instead.
     """
     global DAEMONS_STARTED
-
-    # Create all tables
-    Base.metadata.create_all(bind=engine)
 
     # Only start worker if enabled
     worker_enabled = os.getenv("WORKER_ENABLED", "true").lower() == "true"
@@ -59,3 +66,25 @@ def health():
         "daemons_started": DAEMONS_STARTED,
         "worker_enabled": worker_enabled
     }
+
+
+@app.post("/admin/init")
+def admin_init(key: str | None = Query(default=None)):
+    """
+    Initialize database tables on demand.
+    Protected by INIT_KEY environment variable.
+    Retries up to 5 times with exponential backoff for sleeping Postgres.
+    """
+    require_init_key(key)
+
+    # Retry because Railway Postgres may still be waking up
+    last_err = None
+    for attempt in range(1, 6):
+        try:
+            Base.metadata.create_all(bind=engine)
+            return {"status": "ok", "attempt": attempt}
+        except OperationalError as e:
+            last_err = str(e)
+            time.sleep(2 * attempt)
+
+    raise HTTPException(status_code=503, detail=f"DB init failed after retries: {last_err}")

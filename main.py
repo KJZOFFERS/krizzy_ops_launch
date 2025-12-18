@@ -8,7 +8,13 @@ from sqlalchemy.exc import OperationalError
 from app_v2.database import engine, Base
 import app_v2.models
 
-app = FastAPI()
+# Import LLM control router
+from app_v2.llm_control.command_bus import router as llm_router
+
+app = FastAPI(title="KRIZZY OPS", version="2.0.0")
+
+# Mount LLM command bus
+app.include_router(llm_router, prefix="/v2/llm", tags=["llm_control"])
 
 
 def require_init_key(key: str | None):
@@ -88,3 +94,32 @@ def admin_init(key: str | None = Query(default=None)):
             time.sleep(2 * attempt)
 
     raise HTTPException(status_code=503, detail=f"DB init failed after retries: {last_err}")
+
+
+# =============================================================================
+# Engine Endpoints
+# =============================================================================
+
+@app.get("/metrics")
+def metrics():
+    """System metrics endpoint."""
+    # Lazy import to avoid eager module loading
+    from app_v2.models.system_state import system_state
+    return system_state.get_status()
+
+
+@app.post("/trigger/input")
+def trigger_input():
+    """Manual trigger for input engine (one cycle)."""
+    from app_v2.engines.input_engine import InputEngine
+    engine_instance = InputEngine()
+    result = engine_instance.run_input_cycle()
+    return {"status": "ok", **result}
+
+
+@app.post("/trigger/underwriting")
+def trigger_underwriting():
+    """Manual trigger for underwriting engine (one cycle)."""
+    from app_v2.engines.underwriting_engine import run_underwriting_cycle
+    result = run_underwriting_cycle()
+    return {"status": "ok", **result}

@@ -31,6 +31,16 @@ async def llm_command(cmd: Command):
             "message": "V2 LLM command bus is reachable",
         }
 
+    # REI engine dispatch
+    if cmd.engine == "rei" and cmd.action == "run":
+        from app_v2.engines.rei.run import run_rei_engine
+        run_rei_engine(payload=cmd.payload)
+        return {
+            "status": "dispatched",
+            "engine": "rei",
+            "action": "run",
+        }
+
     # Stub for everything else (you can expand this later)
     return {
         "status": "error",

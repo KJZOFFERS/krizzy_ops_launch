@@ -1,3 +1,5 @@
+print("COMMAND_BUS_LOADED_WITH_REI_RUN_HANDLER")
+
 from typing import Dict, Any
 
 from fastapi import APIRouter
@@ -29,6 +31,17 @@ async def llm_command(cmd: Command):
             "engine": cmd.engine,
             "action": cmd.action,
             "message": "V2 LLM command bus is reachable",
+        }
+
+    # REI engine dispatch
+    if cmd.engine == "rei" and cmd.action == "run":
+        print("REI RUN COMMAND HANDLER HIT")
+        from app_v2.engines.rei.run import run_rei_engine
+        run_rei_engine(payload=cmd.payload)
+        return {
+            "status": "dispatched",
+            "engine": "rei",
+            "action": "run",
         }
 
     # Stub for everything else (you can expand this later)

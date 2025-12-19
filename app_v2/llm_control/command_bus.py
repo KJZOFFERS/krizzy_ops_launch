@@ -36,7 +36,8 @@ async def llm_command(cmd: Command):
     # REI engine dispatch
     if cmd.engine == "rei" and cmd.action == "run":
         print("REI RUN COMMAND HANDLER HIT")
-        from app_v2.engines.rei.run import run_rei_engine
+        from engines.rei_engine import run_rei_engine
+
         run_rei_engine(payload=cmd.payload)
         return {
             "status": "dispatched",

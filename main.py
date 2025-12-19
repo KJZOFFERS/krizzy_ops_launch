@@ -10,6 +10,11 @@ import app_v2.models
 
 app = FastAPI()
 
+# Router wiring
+from app_v2.llm_control.command_bus import router as command_bus_router
+
+app.include_router(command_bus_router)
+
 
 def require_init_key(key: str | None):
     """Validate the INIT_KEY for protected admin endpoints."""

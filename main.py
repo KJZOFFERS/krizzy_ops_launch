@@ -16,6 +16,22 @@ from app_v2.llm_control.command_bus import router as command_bus_router
 app.include_router(command_bus_router)
 
 
+@app.get("/")
+def root():
+    """Default landing endpoint for uptime and platform probes."""
+    return {
+        "message": "Krizzy Ops Launch API",
+        "health_endpoint": "/health",
+        "docs": "/docs",
+    }
+
+
+@app.get("/favicon.ico")
+def favicon():
+    """Return an empty response for browsers requesting a favicon."""
+    return {"status": "ok"}
+
+
 def require_init_key(key: str | None):
     """Validate the INIT_KEY for protected admin endpoints."""
     expected = os.getenv("INIT_KEY")

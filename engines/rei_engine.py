@@ -1,9 +1,12 @@
+import logging
 import threading
 import time
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 from utils.airtable_utils import read_records, update_record
 from utils.discord_utils import post_error, post_ops
+
+logger = logging.getLogger("krizzy_ops_launch.rei_engine")
 
 TABLE_REI = "Leads_REI"
 
@@ -55,6 +58,7 @@ def _safe_update_lead(record_id: str, fields: Dict[str, Any]) -> None:
     try:
         update_record(TABLE_REI, record_id, payload)
     except Exception as e:
+        logger.exception("Airtable update failed for record %s", record_id)
         post_error(f"🔴 REI Engine Update Error: {type(e).__name__}: {e}")
 
 
@@ -68,6 +72,8 @@ def run_rei_engine(payload: Dict[str, Any] | None = None) -> None:
     - Sends top 3 by spread_ratio to Discord.
     - Never writes any field that isn't in Airtable schema.
     """
+    logger.info("rei engine started with payload: %s", payload or {})
+
     run_forever = bool(payload.get("loop_forever")) if isinstance(payload, dict) else False
     sleep_seconds = int(payload.get("sleep_seconds", 60)) if isinstance(payload, dict) else 60
 
@@ -122,13 +128,17 @@ def run_rei_engine(payload: Dict[str, Any] | None = None) -> None:
                     )
                 post_ops("🔥 Top REI Leads_REI (by spread):\n" + "\n".join(lines))
 
+            logger.info("rei engine completed cycle; records_processed=%s", len(records))
+
         except Exception as e:
+            logger.exception("rei engine encountered an error")
             post_error(f"🔴 REI Engine Error: {type(e).__name__}: {e}")
 
         finally:
             if rei_lock.locked():
                 rei_lock.release()
             if not run_forever:
+                logger.info("rei engine finished single run")
                 return
             time.sleep(sleep_seconds)
 

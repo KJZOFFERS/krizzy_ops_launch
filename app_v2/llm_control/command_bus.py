@@ -1,17 +1,46 @@
-print("COMMAND_BUS_LOADED_WITH_REI_RUN_HANDLER")
-
-from typing import Dict, Any
+import logging
+from typing import Any, Callable, Dict, Tuple
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter()
+
+logger = logging.getLogger("krizzy_ops_launch.command_bus")
 
 
 class Command(BaseModel):
     engine: str
     action: str
-    payload: Dict[str, Any] = {}
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+def _rei_run_handler(payload: Dict[str, Any]):
+    logger.info("handler started: engine=rei action=run")
+    try:
+        from engines.rei_engine import run_rei_engine
+
+        run_rei_engine(payload=payload)
+        logger.info("handler finished: engine=rei action=run")
+        return {
+            "status": "dispatched",
+            "engine": "rei",
+            "action": "run",
+        }
+    except Exception as exc:
+        logger.exception("handler error: engine=rei action=run")
+        return {
+            "status": "error",
+            "engine": "rei",
+            "action": "run",
+            "error": "handler_exception",
+            "detail": str(exc),
+        }
+
+
+HANDLERS: Dict[Tuple[str, str], Callable[[Dict[str, Any]], Dict[str, Any]]] = {
+    ("rei", "run"): _rei_run_handler,
+}
 
 
 @router.post("/command")
@@ -33,22 +62,18 @@ async def llm_command(cmd: Command):
             "message": "V2 LLM command bus is reachable",
         }
 
-    # REI engine dispatch
-    if cmd.engine == "rei" and cmd.action == "run":
-        print("REI RUN COMMAND HANDLER HIT")
-        from engines.rei_engine import run_rei_engine
+    handler = HANDLERS.get((cmd.engine, cmd.action))
 
-        run_rei_engine(payload=cmd.payload)
+    if not handler:
+        logger.warning(
+            "handler not found: engine=%s action=%s", cmd.engine, cmd.action
+        )
         return {
-            "status": "dispatched",
-            "engine": "rei",
-            "action": "run",
+            "status": "error",
+            "error": "handler_not_found",
+            "engine": cmd.engine,
+            "action": cmd.action,
         }
 
-    # Stub for everything else (you can expand this later)
-    return {
-        "status": "error",
-        "error": "unsupported_command",
-        "engine": cmd.engine,
-        "action": cmd.action,
-    }
+    logger.info("handler resolved: engine=%s action=%s", cmd.engine, cmd.action)
+    return handler(cmd.payload)

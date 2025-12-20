@@ -1,12 +1,11 @@
+import logging
 import os
 import time
-from fastapi import FastAPI, HTTPException, Query
-import threading
-from sqlalchemy.exc import OperationalError
 
-# Import DB infrastructure
-from app_v2.database import engine, Base
-import app_v2.models
+from fastapi import FastAPI, HTTPException, Query
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("krizzy_ops_launch.main")
 
 app = FastAPI()
 
@@ -31,61 +30,25 @@ def favicon():
     """Return an empty response for browsers requesting a favicon."""
     return {"status": "ok"}
 
-
 def require_init_key(key: str | None):
     """Validate the INIT_KEY for protected admin endpoints."""
     expected = os.getenv("INIT_KEY")
     if not expected or key != expected:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-DAEMONS_STARTED = False
-
 
 @app.on_event("startup")
 def startup_event():
-    """
-    Boot-time execution kernel.
-    Starts autonomous worker loop if enabled.
-    NOTE: DB tables are NOT created here - use /admin/init endpoint instead.
-    """
-    global DAEMONS_STARTED
-
-    # Only start worker if enabled
-    worker_enabled = os.getenv("WORKER_ENABLED", "true").lower() == "true"
-
-    if worker_enabled:
-        try:
-            # Lazy import to avoid eager DB connection
-            from app_v2.agent.v2_llm_worker import run_worker_loop
-
-            # Start autonomous execution loop
-            worker_thread = threading.Thread(target=run_worker_loop, daemon=True)
-            worker_thread.start()
-
-            DAEMONS_STARTED = True
-
-        except Exception as e:
-            DAEMONS_STARTED = False
-            raise RuntimeError(f"Failed to start worker: {e}")
-    else:
-        DAEMONS_STARTED = False
+    """Minimal startup: register routers and log readiness."""
+    logger.info("Application startup complete; routers registered.")
 
 
 @app.get("/health")
 def health():
     """Health check endpoint."""
-    worker_enabled = os.getenv("WORKER_ENABLED", "true").lower() == "true"
-
-    if worker_enabled and not DAEMONS_STARTED:
-        raise HTTPException(
-            status_code=500,
-            detail="Execution kernel not running"
-        )
-
     return {
         "status": "ok",
-        "daemons_started": DAEMONS_STARTED,
-        "worker_enabled": worker_enabled
+        "message": "service ready"
     }
 
 
@@ -98,14 +61,24 @@ def admin_init(key: str | None = Query(default=None)):
     """
     require_init_key(key)
 
+    # Lazy import to avoid any DB work before explicit initialization
+    from app_v2.database import engine, Base
+    import app_v2.models  # noqa: F401  # ensure models are registered
+
+    logger.info("/admin/init invoked; starting schema creation")
+
     # Retry because Railway Postgres may still be waking up
     last_err = None
     for attempt in range(1, 6):
         try:
             Base.metadata.create_all(bind=engine)
+            logger.info("Database schema ensured on attempt %s", attempt)
             return {"status": "ok", "attempt": attempt}
-        except OperationalError as e:
+        except Exception as e:
             last_err = str(e)
+            logger.warning(
+                "Database init attempt %s failed: %s", attempt, last_err
+            )
             time.sleep(2 * attempt)
 
     raise HTTPException(status_code=503, detail=f"DB init failed after retries: {last_err}")

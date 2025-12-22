@@ -4,10 +4,6 @@ from fastapi import FastAPI, HTTPException, Query
 import threading
 from sqlalchemy.exc import OperationalError
 
-# Import DB infrastructure
-from app_v2.database import engine, Base
-import app_v2.models
-
 app = FastAPI()
 
 # Router wiring
@@ -98,10 +94,20 @@ def admin_init(key: str | None = Query(default=None)):
     """
     require_init_key(key)
 
+    # Lazy import to avoid touching DB until explicitly requested
+    from app_v2.database import Base, get_engine
+    from utils.db_probe import resolve_db_url
+
+    try:
+        db_url = resolve_db_url()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
     # Retry because Railway Postgres may still be waking up
     last_err = None
     for attempt in range(1, 6):
         try:
+            engine = get_engine(db_url)
             Base.metadata.create_all(bind=engine)
             return {"status": "ok", "attempt": attempt}
         except OperationalError as e:
@@ -109,3 +115,15 @@ def admin_init(key: str | None = Query(default=None)):
             time.sleep(2 * attempt)
 
     raise HTTPException(status_code=503, detail=f"DB init failed after retries: {last_err}")
+
+
+@app.get("/ops/db")
+def ops_db():
+    """Operational endpoint to probe database connectivity."""
+    from utils.db_probe import probe_db
+
+    result = probe_db()
+    if result.get("ok"):
+        return result
+
+    raise HTTPException(status_code=503, detail=result)

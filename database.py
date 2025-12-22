@@ -1,4 +1,4 @@
 # Compatibility shim - imports from canonical source
-from app_v2.database import engine, SessionLocal, Base, get_db
+from app_v2.database import Base, get_db, get_engine, get_session_maker
 
-__all__ = ["engine", "SessionLocal", "Base", "get_db"]
+__all__ = ["Base", "get_db", "get_engine", "get_session_maker"]

@@ -1,36 +1,38 @@
-import os
+from functools import lru_cache
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# Read DATABASE_URL from environment
-DATABASE_URL = os.environ.get("DATABASE_URL")
+from utils.db_probe import resolve_db_url
 
-if not DATABASE_URL:
-    # Fallback to SQLite for local development
-    DATABASE_URL = "sqlite:///./app.db"
-
-# Strip quotes if present
-DATABASE_URL = DATABASE_URL.strip().strip('"').strip("'")
-
-# Engine configuration
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        pool_pre_ping=True
-    )
-else:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-
-# Session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Base class for models
 Base = declarative_base()
 
 
-def get_db():
+def _build_engine(db_url: str | None = None):
+    url = resolve_db_url(db_url)
+    engine_kwargs: dict = {"pool_pre_ping": True}
+
+    if url.startswith("postgresql://"):
+        engine_kwargs["connect_args"] = {"connect_timeout": 3}
+    if url.startswith("sqlite"):
+        engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+    return create_engine(url, **engine_kwargs)
+
+
+@lru_cache(maxsize=1)
+def get_engine(db_url: str | None = None):
+    """Lazily create and cache the SQLAlchemy engine."""
+    return _build_engine(db_url)
+
+
+def get_session_maker(db_url: str | None = None):
+    """Provide a sessionmaker bound to the lazily created engine."""
+    return sessionmaker(autocommit=False, autoflush=False, bind=get_engine(db_url))
+
+
+def get_db(db_url: str | None = None):
     """FastAPI dependency for database sessions"""
+    SessionLocal = get_session_maker(db_url)
     db = SessionLocal()
     try:
         yield db

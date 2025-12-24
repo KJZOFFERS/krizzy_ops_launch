@@ -1,0 +1,19 @@
+name: KRIZZY OPS Tick
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call scheduler tick
+        run: |
+          curl -sS -X POST "${{ secrets.KRIZZY_TICK_URL }}" \
+            -H "Content-Type: application/json" \
+            --max-time 20 \
+            --retry 3 \
+            --retry-delay 2 \
+            --retry-all-errors

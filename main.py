@@ -99,6 +99,7 @@ def admin_init(key: str | None = Query(default=None)):
 
     # Lazy import to avoid touching DB until explicitly requested
     from app_v2.database import Base, get_engine
+    import app_v2.models  # noqa: F401  # Ensure all models are registered with metadata
     from utils.db_probe import resolve_db_url
 
     try:
@@ -136,7 +137,7 @@ def ops_db():
 def scheduler_tick():
     """Enqueue recurring engine jobs without executing inline."""
     jobs = []
-    for engine in ["rei", "govcon"]:
+    for engine in ["rei", "govcon", "deal_closer"]:
         job = enqueue_engine_run(engine)
         jobs.append({"id": job.id, "engine": engine})
     return {"status": "enqueued", "jobs": jobs}
@@ -153,4 +154,11 @@ def trigger_rei(payload: Dict[str, Any] | None = None):
 def trigger_govcon(payload: Dict[str, Any] | None = None):
     """Queue a single GovCon engine run."""
     job = enqueue_engine_run("govcon", payload=payload)
+    return {"status": "enqueued", "job_id": job.id}
+
+
+@app.post("/trigger/deal-closer")
+def trigger_deal_closer(payload: Dict[str, Any] | None = None):
+    """Queue a single Deal Closer engine run."""
+    job = enqueue_engine_run("deal_closer", payload=payload)
     return {"status": "enqueued", "job_id": job.id}

@@ -77,3 +77,17 @@ def enqueue_engine_run(engine: str, payload: Optional[Dict[str, Any]] = None, db
         job_payload.update(payload)
 
     return enqueue_job("run_engine", payload=job_payload, db=db)
+
+
+def enqueue_match_buyers(
+    deal_id: int,
+    details: Optional[Dict[str, Any]] = None,
+    db: Optional[Session] = None,
+) -> Job:
+    """Queue a buyer-matching event for downstream processors."""
+
+    payload: Dict[str, Any] = {"deal_id": deal_id}
+    if details:
+        payload.update(details)
+
+    return enqueue_job("match_buyers", payload=payload, db=db)

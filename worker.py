@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app_v2.database import get_session_maker
 from app_v2.models.job import Job
+from engines.deal_closer_engine import run_deal_closer_engine
 from engines.govcon_engine import run_govcon_engine
 from engines.rei_engine import run_rei_engine
 from utils.airtable_utils import update_record, write_record
@@ -71,13 +72,22 @@ def _perform_run_engine(job: Job) -> None:
         run_rei_engine(payload=payload)
     elif engine == "govcon":
         run_govcon_engine(payload=payload)
+    elif engine == "deal_closer":
+        run_deal_closer_engine(payload=payload)
     else:
         raise ValueError(f"Unknown engine: {engine}")
+
+
+def _perform_match_buyers(job: Job) -> None:
+    payload = job.payload or {}
+    deal_id = payload.get("deal_id")
+    logger.info("match_buyers event queued for deal_id=%s payload=%s", deal_id, payload)
 
 
 HANDLERS: Dict[str, Callable[[Job], None]] = {
     "sync_airtable": _perform_sync_airtable,
     "run_engine": _perform_run_engine,
+    "match_buyers": _perform_match_buyers,
 }
 
 

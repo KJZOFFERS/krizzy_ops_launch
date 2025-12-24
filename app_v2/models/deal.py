@@ -31,6 +31,7 @@ class Deal:
     seller_name: Optional[str] = None
     seller_phone: Optional[str] = None
     seller_email: Optional[str] = None
+    deadline: Optional[datetime] = None
     raw_payload: Optional[str] = None
 
     # Lifecycle

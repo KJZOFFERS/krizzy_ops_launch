@@ -7,7 +7,7 @@ INTERVAL_SECONDS = 900  # 15 minutes
 
 def scheduler_loop(db_factory):
     while True:
-        for engine in ["rei", "govcon"]:
+        for engine in ["rei", "govcon", "deal_closer"]:
             try:
                 enqueue_engine_run(engine)
             except Exception as e:  # noqa: BLE001

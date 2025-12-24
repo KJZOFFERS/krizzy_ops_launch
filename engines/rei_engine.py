@@ -2,7 +2,8 @@ import threading
 import time
 from typing import Dict, Any, List
 
-from utils.airtable_utils import read_records, update_record
+from job_queue import enqueue_sync_airtable
+from utils.airtable_utils import read_records
 from utils.discord_utils import post_error, post_ops
 
 TABLE_REI = "Leads_REI"
@@ -53,7 +54,12 @@ def _safe_update_lead(record_id: str, fields: Dict[str, Any]) -> None:
         return
 
     try:
-        update_record(TABLE_REI, record_id, payload)
+        enqueue_sync_airtable(
+            TABLE_REI,
+            payload,
+            method="update",
+            record_id=record_id,
+        )
     except Exception as e:
         post_error(f"🔴 REI Engine Update Error: {type(e).__name__}: {e}")
 
@@ -131,4 +137,3 @@ def run_rei_engine(payload: Dict[str, Any] | None = None) -> None:
             if not run_forever:
                 return
             time.sleep(sleep_seconds)
-

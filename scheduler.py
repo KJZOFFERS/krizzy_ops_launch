@@ -1,25 +1,16 @@
 import time
-from models import Job
+
+from job_queue import enqueue_engine_run
 
 INTERVAL_SECONDS = 900  # 15 minutes
 
+
 def scheduler_loop(db_factory):
     while True:
-        db = db_factory()
-        try:
-            for engine in ["rei", "govcon"]:
-                job = Job(
-                    engine=engine,
-                    step="run_pipeline",
-                    payload={}
-                )
-                db.add(job)
-
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            print("Scheduler error:", e)
-        finally:
-            db.close()
+        for engine in ["rei", "govcon"]:
+            try:
+                enqueue_engine_run(engine)
+            except Exception as e:  # noqa: BLE001
+                print("Scheduler error:", e)
 
         time.sleep(INTERVAL_SECONDS)

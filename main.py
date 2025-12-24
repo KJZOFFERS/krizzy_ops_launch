@@ -2,12 +2,15 @@ import os
 import time
 from fastapi import FastAPI, HTTPException, Query
 import threading
+from typing import Any, Dict
+
 from sqlalchemy.exc import OperationalError
 
 app = FastAPI()
 
 # Router wiring
 from app_v2.llm_control.command_bus import router as command_bus_router
+from job_queue import enqueue_engine_run
 
 app.include_router(command_bus_router)
 
@@ -127,3 +130,27 @@ def ops_db():
         return result
 
     raise HTTPException(status_code=503, detail=result)
+
+
+@app.post("/scheduler/tick")
+def scheduler_tick():
+    """Enqueue recurring engine jobs without executing inline."""
+    jobs = []
+    for engine in ["rei", "govcon"]:
+        job = enqueue_engine_run(engine)
+        jobs.append({"id": job.id, "engine": engine})
+    return {"status": "enqueued", "jobs": jobs}
+
+
+@app.post("/trigger/rei")
+def trigger_rei(payload: Dict[str, Any] | None = None):
+    """Queue a single REI engine run."""
+    job = enqueue_engine_run("rei", payload=payload)
+    return {"status": "enqueued", "job_id": job.id}
+
+
+@app.post("/trigger/govcon")
+def trigger_govcon(payload: Dict[str, Any] | None = None):
+    """Queue a single GovCon engine run."""
+    job = enqueue_engine_run("govcon", payload=payload)
+    return {"status": "enqueued", "job_id": job.id}

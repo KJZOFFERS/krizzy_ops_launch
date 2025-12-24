@@ -1,8 +1,9 @@
 import threading
-from typing import Dict, Any
 from datetime import datetime
+from typing import Dict, Any
 
-from utils.airtable_utils import read_records, write_record, update_record
+from job_queue import enqueue_sync_airtable
+from utils.airtable_utils import read_records
 from utils.discord_utils import post_error, post_ops
 
 # Staging tables
@@ -78,13 +79,18 @@ def _ingest_rei_records() -> Dict[str, int]:
                 lead_fields["Ingest_TS"] = datetime.utcnow().isoformat()
 
                 # Write to production table
-                write_record(TABLE_LEADS_REI, lead_fields)
+                enqueue_sync_airtable(
+                    TABLE_LEADS_REI,
+                    lead_fields,
+                    method="write",
+                )
 
                 # Mark staging record as INGESTED (clear old error if any)
-                update_record(
+                enqueue_sync_airtable(
                     TABLE_INBOUND_REI,
-                    record_id,
-                    {"Status": "INGESTED", "Error_Message": ""}
+                    {"Status": "INGESTED", "Error_Message": ""},
+                    method="update",
+                    record_id=record_id,
                 )
 
                 processed += 1
@@ -95,13 +101,14 @@ def _ingest_rei_records() -> Dict[str, int]:
 
                 # Mark staging record as ERROR with message
                 try:
-                    update_record(
+                    enqueue_sync_airtable(
                         TABLE_INBOUND_REI,
-                        record_id,
                         {
                             "Status": "ERROR",
                             "Error_Message": error_msg[:500],
                         },
+                        method="update",
+                        record_id=record_id,
                     )
                 except Exception:
                     # Best effort; log to Discord at least
@@ -165,13 +172,18 @@ def _ingest_govcon_records() -> Dict[str, int]:
                 opp_fields["Status"] = "NEW"
 
                 # Write to production table
-                write_record(TABLE_GOVCON_OPPORTUNITIES, opp_fields)
+                enqueue_sync_airtable(
+                    TABLE_GOVCON_OPPORTUNITIES,
+                    opp_fields,
+                    method="write",
+                )
 
                 # Mark staging record as INGESTED
-                update_record(
+                enqueue_sync_airtable(
                     TABLE_INBOUND_GOVCON,
-                    record_id,
                     {"Status": "INGESTED", "Error_Message": ""},
+                    method="update",
+                    record_id=record_id,
                 )
 
                 processed += 1
@@ -181,13 +193,14 @@ def _ingest_govcon_records() -> Dict[str, int]:
                 error_msg = f"{type(e).__name__}: {str(e)}"
 
                 try:
-                    update_record(
+                    enqueue_sync_airtable(
                         TABLE_INBOUND_GOVCON,
-                        record_id,
                         {
                             "Status": "ERROR",
                             "Error_Message": error_msg[:500],
                         },
+                        method="update",
+                        record_id=record_id,
                     )
                 except Exception:
                     pass

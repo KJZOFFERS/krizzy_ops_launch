@@ -1,8 +1,9 @@
 import threading
 import time
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
-from utils.airtable_utils import read_records, update_record
+from job_queue import enqueue_sync_airtable
+from utils.airtable_utils import read_records
 from utils.discord_utils import post_error
 
 TABLE_GOVCON = "GovCon Opportunities"
@@ -41,6 +42,9 @@ def _safe_update_govcon(record_id: str, fields: Dict[str, Any]) -> None:
     Only send fields that exist in GovCon Opportunities and are in our update whitelist.
     This guarantees no 422 from invalid field names.
     """
+    if not record_id:
+        return
+
     payload = {
         k: v
         for k, v in fields.items()
@@ -48,10 +52,15 @@ def _safe_update_govcon(record_id: str, fields: Dict[str, Any]) -> None:
     }
     if not payload:
         return
-    update_record(TABLE_GOVCON, record_id, payload)
+    enqueue_sync_airtable(
+        TABLE_GOVCON,
+        payload,
+        method="update",
+        record_id=record_id,
+    )
 
 
-def run_govcon_engine() -> None:
+def run_govcon_engine(payload: Dict[str, Any] | None = None) -> None:
     """
     GovCon scoring engine.
 
@@ -59,9 +68,14 @@ def run_govcon_engine() -> None:
     - Computes Hotness Score from Total Value (simple baseline).
     - Writes Hotness Score only.
     """
+    run_forever = bool(payload.get("loop_forever")) if isinstance(payload, dict) else False
+    sleep_seconds = int(payload.get("sleep_seconds", 300)) if isinstance(payload, dict) else 300
+
     while True:
         if not govcon_lock.acquire(blocking=False):
-            time.sleep(300)
+            if not run_forever:
+                return
+            time.sleep(sleep_seconds)
             continue
 
         try:
@@ -88,4 +102,6 @@ def run_govcon_engine() -> None:
 
         finally:
             govcon_lock.release()
-            time.sleep(300)
+            if not run_forever:
+                return
+            time.sleep(sleep_seconds)

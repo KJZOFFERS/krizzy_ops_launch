@@ -1,10 +1,15 @@
+import logging
 import os
-import time
-from fastapi import FastAPI, HTTPException, Query
 import threading
+import time
 from typing import Any, Dict
 
+from fastapi import FastAPI, HTTPException, Query
+
 from sqlalchemy.exc import OperationalError
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("krizzy.ops.launch")
 
 app = FastAPI()
 
@@ -52,6 +57,8 @@ def startup_event():
     # Only start worker if enabled
     worker_enabled = os.getenv("WORKER_ENABLED", "true").lower() == "true"
 
+    logger.info("Boot sequence starting", extra={"worker_enabled": worker_enabled})
+
     if worker_enabled:
         try:
             # Lazy import to avoid eager DB connection
@@ -63,11 +70,14 @@ def startup_event():
 
             DAEMONS_STARTED = True
 
+            logger.info("Worker loop started", extra={"thread_name": worker_thread.name})
+
         except Exception as e:
             DAEMONS_STARTED = False
             raise RuntimeError(f"Failed to start worker: {e}")
     else:
         DAEMONS_STARTED = False
+        logger.info("Worker disabled via WORKER_ENABLED flag")
 
 
 @app.get("/health")

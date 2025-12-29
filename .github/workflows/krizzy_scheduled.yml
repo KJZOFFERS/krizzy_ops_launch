@@ -1,0 +1,85 @@
+name: KRIZZY OPS Scheduled Calls
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: krizzy-ops-scheduled
+  cancel-in-progress: true
+
+jobs:
+  call-endpoints:
+    runs-on: ubuntu-latest
+    env:
+      API_KEY: ${{ secrets.KRIZZY_API_KEY }}
+      BASE_URL: https://krizzyopslaunch-production.up.railway.app
+    steps:
+      - name: Call scheduler endpoints with retries
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${API_KEY:-}" ]]; then
+            echo "API key secret (KRIZZY_API_KEY) is not set."
+            exit 1
+          fi
+
+          endpoints=(
+            "$BASE_URL/scheduler/tick"
+            "$BASE_URL/outbound/run"
+          )
+
+          max_attempts=5
+          initial_delay=2
+          max_body_length=800
+
+          log() {
+            local message="$1"
+            echo "$(date -Iseconds) | $message"
+          }
+
+          call_endpoint() {
+            local url="$1"
+            local attempt=1
+            local delay=$initial_delay
+
+            while (( attempt <= max_attempts )); do
+              response="$(mktemp)"
+              status_code=0
+
+              if curl -sS -X POST "$url" \
+                -H "Authorization: Bearer $API_KEY" \
+                -H "Content-Type: application/json" \
+                --max-time 30 \
+                -w "%{http_code}" \
+                -o "$response" >status.tmp; then
+                status_code="$(cat status.tmp)"
+              else
+                status_code=0
+              fi
+
+              body="$(head -c "$max_body_length" "$response" 2>/dev/null || true)"
+              rm -f "$response" status.tmp
+
+              log "URL=$url | attempt=$attempt | status=$status_code | body=${body:-<empty>}"
+
+              if [[ "$status_code" =~ ^2[0-9]{2}$ ]]; then
+                return 0
+              fi
+
+              if (( attempt == max_attempts )); then
+                log "All retry attempts failed for $url"
+                return 1
+              fi
+
+              log "Retrying in ${delay}s..."
+              sleep "$delay"
+              delay=$(( delay * 2 ))
+              attempt=$(( attempt + 1 ))
+            done
+          }
+
+          for endpoint in "${endpoints[@]}"; do
+            call_endpoint "$endpoint"
+          done

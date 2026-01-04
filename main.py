@@ -15,9 +15,11 @@ app = FastAPI()
 
 # Router wiring
 from app_v2.llm_control.command_bus import router as command_bus_router
+from app_v2.routes_feeds import router as feeds_router
 from job_queue import enqueue_engine_run
 
 app.include_router(command_bus_router)
+app.include_router(feeds_router)
 
 
 @app.get("/")

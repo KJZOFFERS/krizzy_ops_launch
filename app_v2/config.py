@@ -1,9 +1,11 @@
+import json
 import os
-from typing import Dict, Any
+from typing import Any, Dict, List, Optional
 
 # Environment variables
-AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID")
+AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY") or os.environ.get("AIRTABLE_PAT")
+AIRTABLE_PAT = AIRTABLE_API_KEY
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID") or "appIe21nS9Z9ahV7V"
 DISCORD_WEBHOOK_OPS = os.environ.get("DISCORD_WEBHOOK_OPS")
 DISCORD_WEBHOOK_ERRORS = os.environ.get("DISCORD_WEBHOOK_ERRORS")
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
@@ -11,6 +13,44 @@ TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_MESSAGING_SERVICE_SID = os.environ.get("TWILIO_MESSAGING_SERVICE_SID")
 GMAIL_CREDENTIALS_JSON = os.environ.get("GMAIL_CREDENTIALS_JSON")
 GMAIL_TOKEN_JSON = os.environ.get("GMAIL_TOKEN_JSON")
+
+# Ops + environment
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "local")
+INIT_KEY = os.environ.get("INIT_KEY")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+# SAM.gov / GovCon feed
+SAM_API_KEY = os.environ.get("SAM_API_KEY")
+GOVCON_PTYPE = os.environ.get("GOVCON_PTYPE")
+GOVCON_NAICS = os.environ.get("GOVCON_NAICS")
+GOVCON_SETASIDE = os.environ.get("GOVCON_SETASIDE")
+GOVCON_RDL_FROM = os.environ.get("GOVCON_RDL_FROM")
+GOVCON_RDL_TO = os.environ.get("GOVCON_RDL_TO")
+
+# REI feed
+REI_SOURCES_JSON = os.environ.get("REI_SOURCES_JSON")
+
+
+def get_naics_codes() -> List[str]:
+    """Parse GOVCON_NAICS env into a list (comma-separated)."""
+    if not GOVCON_NAICS:
+        return []
+    if "," in GOVCON_NAICS:
+        return [code.strip() for code in GOVCON_NAICS.split(",") if code.strip()]
+    return [GOVCON_NAICS.strip()]
+
+
+def get_rei_sources() -> List[Dict[str, Any]]:
+    """Parse REI_SOURCES_JSON into a list of sources."""
+    if not REI_SOURCES_JSON:
+        return []
+    try:
+        parsed = json.loads(REI_SOURCES_JSON)
+        if isinstance(parsed, list):
+            return [item for item in parsed if isinstance(item, dict)]
+    except json.JSONDecodeError:
+        return []
+    return []
 
 # Airtable tables
 TABLE_INBOUND_REI = "Inbound_REI_Raw"

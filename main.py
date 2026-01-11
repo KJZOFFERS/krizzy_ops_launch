@@ -4,9 +4,14 @@ import threading
 import time
 from typing import Any, Dict
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException
 
 from sqlalchemy.exc import OperationalError
+
+from utils.airtable_meta import AirtableMetaCache
+from utils.codex import Codex, CodexError
+from utils.db import db_ping, get_engine
+from utils.models import Base as OpsBase
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("krizzy.ops.launch")
@@ -37,12 +42,6 @@ def favicon():
     """Return an empty response for browsers requesting a favicon."""
     return {"status": "ok"}
 
-
-def require_init_key(key: str | None):
-    """Validate the INIT_KEY for protected admin endpoints."""
-    expected = os.getenv("INIT_KEY")
-    if not expected or key != expected:
-        raise HTTPException(status_code=403, detail="Forbidden")
 
 DAEMONS_STARTED = False
 
@@ -101,36 +100,50 @@ def health():
 
 
 @app.post("/admin/init")
-def admin_init(key: str | None = Query(default=None)):
+def admin_init(x_init_key: str = Header(default="")):
     """
     Initialize database tables on demand.
     Protected by INIT_KEY environment variable.
     Retries up to 5 times with exponential backoff for sleeping Postgres.
     """
-    require_init_key(key)
+    cx = Codex.load()
+    if x_init_key != cx.INIT_KEY:
+        raise HTTPException(status_code=401, detail="bad init key")
 
     # Lazy import to avoid touching DB until explicitly requested
-    from app_v2.database import Base, get_engine
+    from app_v2.database import Base
     import app_v2.models  # noqa: F401  # Ensure all models are registered with metadata
-    from utils.db_probe import resolve_db_url
-
-    try:
-        db_url = resolve_db_url()
-    except ValueError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
 
     # Retry because Railway Postgres may still be waking up
     last_err = None
     for attempt in range(1, 6):
         try:
-            engine = get_engine(db_url)
+            engine = get_engine(cx.DATABASE_URL)
             Base.metadata.create_all(bind=engine)
+            OpsBase.metadata.create_all(bind=engine)
             return {"status": "ok", "attempt": attempt}
         except OperationalError as e:
             last_err = str(e)
             time.sleep(2 * attempt)
 
     raise HTTPException(status_code=503, detail=f"DB init failed after retries: {last_err}")
+
+
+@app.get("/codex/check")
+def codex_check():
+    try:
+        cx = Codex.load()
+    except CodexError as e:
+        return {"ok": False, "error": str(e)}
+
+    db = db_ping(cx.DATABASE_URL)
+    if not db["ok"]:
+        return {"ok": False, "error": "DB_PING_FAIL", "detail": db}
+
+    # Airtable meta existence check (no table writes)
+    meta = AirtableMetaCache(cx.AIRTABLE_PAT, cx.AIRTABLE_BASE_ID)
+    data = meta.fetch()
+    return {"ok": True, "tables": len(data.get("tables", []))}
 
 
 @app.get("/ops/db")

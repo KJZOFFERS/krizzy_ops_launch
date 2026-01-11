@@ -2,8 +2,10 @@ import threading
 import time
 from typing import Any, Dict, List
 
-from job_queue import enqueue_sync_airtable
 from utils.airtable_utils import read_records
+from utils.airtable_meta import AirtableMetaCache
+from utils.airtable_safe_upsert import AirtableSafeUpsert
+from utils.codex import Codex
 from utils.discord_utils import post_error
 
 TABLE_GOVCON = "GovCon Opportunities"
@@ -37,26 +39,29 @@ GOVCON_UPDATE_FIELDS = {"Hotness Score"}
 govcon_lock = threading.Lock()
 
 
-def _safe_update_govcon(record_id: str, fields: Dict[str, Any]) -> None:
-    """
-    Only send fields that exist in GovCon Opportunities and are in our update whitelist.
-    This guarantees no 422 from invalid field names.
-    """
-    if not record_id:
+def _safe_upsert_govcon(
+    safe: AirtableSafeUpsert,
+    table_id: str,
+    merge_field_id: str,
+    merge_field_name: str,
+    fields: Dict[str, Any],
+) -> None:
+    payload = {}
+    if merge_field_name in (fields or {}):
+        payload[merge_field_name] = fields[merge_field_name]
+    payload.update(
+        {
+            k: v
+            for k, v in (fields or {}).items()
+            if k in GOVCON_UPDATE_FIELDS and k in GOVCON_FIELDS
+        }
+    )
+    if not payload or merge_field_name not in payload:
         return
-
-    payload = {
-        k: v
-        for k, v in fields.items()
-        if k in GOVCON_UPDATE_FIELDS and k in GOVCON_FIELDS
-    }
-    if not payload:
-        return
-    enqueue_sync_airtable(
-        TABLE_GOVCON,
-        payload,
-        method="update",
-        record_id=record_id,
+    safe.upsert(
+        table_id=table_id,
+        records=[{"fields": payload}],
+        merge_field_id=merge_field_id,
     )
 
 
@@ -79,6 +84,9 @@ def run_govcon_engine(payload: Dict[str, Any] | None = None) -> None:
             continue
 
         try:
+            cx = Codex.load()
+            meta = AirtableMetaCache(cx.AIRTABLE_PAT, cx.AIRTABLE_BASE_ID)
+            safe = AirtableSafeUpsert(cx.AIRTABLE_PAT, cx.AIRTABLE_BASE_ID, meta)
             records = read_records(TABLE_GOVCON)
 
             for rec in records:
@@ -95,7 +103,13 @@ def run_govcon_engine(payload: Dict[str, Any] | None = None) -> None:
 
                 score = min(100.0, total_value / 1000.0)
 
-                _safe_update_govcon(rec["id"], {"Hotness Score": score})
+                _safe_upsert_govcon(
+                    safe,
+                    cx.GOVCON_OPPS_TABLE_ID,
+                    cx.GOVCON_MERGE_FIELD_ID,
+                    "Opportunity Name",
+                    {"Opportunity Name": name, "Hotness Score": score},
+                )
 
         except Exception as e:
             post_error(f"🔴 GovCon Engine Error: {type(e).__name__}: {e}")
